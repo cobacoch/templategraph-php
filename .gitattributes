@@ -1,0 +1,18 @@
+# Line ending normalization (cross-platform safety).
+* text=auto eol=lf
+
+# GitHub Linguist: treat markdown as documentation in language stats.
+*.md linguist-documentation
+
+# Exclude Rust sources and build configuration from Composer dist archives.
+# Composer fetches via `git archive`, which honors export-ignore.
+/Cargo.toml      export-ignore
+/Cargo.lock      export-ignore
+/src/            export-ignore
+/tests/          export-ignore
+/fixtures/       export-ignore
+
+# Exclude developer config and git metadata from Composer dist archives.
+/.editorconfig   export-ignore
+/.github/        export-ignore
+/.gitattributes  export-ignore

@@ -1,0 +1,14 @@
+[package]
+name = "templategraph-php"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Kota Kobayashi <kk@cobaco.ch>"]
+description = "Template include graph generator for PHP static sites"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cobacoch/templategraph-php"
+readme = "README.md"
+keywords = ["php", "template", "graph", "include", "static-site"]
+categories = ["development-tools", "command-line-utilities"]
+
+[dependencies]
