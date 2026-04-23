@@ -12,6 +12,13 @@ workflow, conventions, and expectations for contributions to this project.
 - For feature requests, describe the use case and the problem you are trying
   to solve, not just the proposed solution.
 
+## Development Setup
+
+After cloning, install [lefthook](https://lefthook.dev/) and run
+`lefthook install` from the repository root. This activates a
+`commit-msg` hook that validates the commit subject format described
+in [Commit Messages](#commit-messages).
+
 ## Development Workflow
 
 This project follows **GitHub Flow**:

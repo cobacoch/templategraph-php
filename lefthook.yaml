@@ -1,0 +1,28 @@
+# Lefthook configuration.
+# Install lefthook (https://lefthook.dev/) and run `lefthook install`
+# in the repository root to activate the hooks below.
+
+commit-msg:
+  commands:
+    subject-format:
+      # Skip during merge/rebase flows where the commit message is
+      # machine-generated or later rewritten.
+      skip:
+        - merge
+        - rebase
+      run: |
+        subject=$(grep -v '^#' {1} | grep -vE '^[[:space:]]*$' | head -n 1)
+        case "$subject" in
+          fixup!*|squash!*|amend!*) exit 0 ;;
+        esac
+        if ! printf '%s' "$subject" | grep -qE '^[^[:alnum:][:space:]][^[:space:]]* [A-Z]'; then
+          {
+            echo "Commit subject must be '<gitmoji> <Uppercase Subject>'."
+            echo "  Got: $subject"
+            echo "  Examples:"
+            echo "    🎉 First commit"
+            echo "    ✨ Add scan subcommand"
+            echo "  See CONTRIBUTING.md for the gitmoji-to-type mapping."
+          } >&2
+          exit 1
+        fi
