@@ -11,6 +11,8 @@
 /src/            export-ignore
 /tests/          export-ignore
 /fixtures/       export-ignore
+/about.toml      export-ignore
+/about.hbs       export-ignore
 
 # Exclude developer config and git metadata from Composer dist archives.
 /.editorconfig   export-ignore

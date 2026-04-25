@@ -1,0 +1,16 @@
+# License allowlist for THIRD-PARTY-LICENSES generation.
+# Order matters: cargo-about picks the first match for "X OR Y" expressions.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "MIT-0",
+]
+
+# Only runtime dependencies need attribution in distributed binaries.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
