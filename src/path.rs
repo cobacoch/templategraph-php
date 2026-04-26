@@ -1,15 +1,29 @@
 use std::path::{Path, PathBuf};
 
+use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PathError {
+    #[error("path is empty")]
+    Empty,
+    #[error("path is not absolute: {0:?}")]
+    NotAbsolute(PathBuf),
+    #[error("path is not relative: {0:?}")]
+    NotRelative(PathBuf),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AbsolutePath(PathBuf);
 
 impl AbsolutePath {
-    pub fn new(path: PathBuf) -> Option<Self> {
-        if path.is_absolute() {
-            Some(Self(path))
-        } else {
-            None
+    pub fn new(path: PathBuf) -> Result<Self, PathError> {
+        if path.as_os_str().is_empty() {
+            return Err(PathError::Empty);
         }
+        if !path.is_absolute() {
+            return Err(PathError::NotAbsolute(path));
+        }
+        Ok(Self(path))
     }
 
     pub fn as_path(&self) -> &Path {
@@ -25,12 +39,14 @@ impl AbsolutePath {
 pub struct RootRelativePath(PathBuf);
 
 impl RootRelativePath {
-    pub fn new(path: PathBuf) -> Option<Self> {
-        if path.is_relative() {
-            Some(Self(path))
-        } else {
-            None
+    pub fn new(path: PathBuf) -> Result<Self, PathError> {
+        if path.as_os_str().is_empty() {
+            return Err(PathError::Empty);
         }
+        if !path.is_relative() {
+            return Err(PathError::NotRelative(path));
+        }
+        Ok(Self(path))
     }
 
     pub fn as_path(&self) -> &Path {
@@ -54,7 +70,18 @@ mod tests {
 
     #[test]
     fn absolute_path_rejects_relative() {
-        assert!(AbsolutePath::new(PathBuf::from("foo/bar")).is_none());
+        assert!(matches!(
+            AbsolutePath::new(PathBuf::from("foo/bar")),
+            Err(PathError::NotAbsolute(_))
+        ));
+    }
+
+    #[test]
+    fn absolute_path_rejects_empty() {
+        assert!(matches!(
+            AbsolutePath::new(PathBuf::new()),
+            Err(PathError::Empty)
+        ));
     }
 
     #[test]
@@ -65,6 +92,17 @@ mod tests {
 
     #[test]
     fn root_relative_path_rejects_absolute() {
-        assert!(RootRelativePath::new(PathBuf::from("/foo/bar")).is_none());
+        assert!(matches!(
+            RootRelativePath::new(PathBuf::from("/foo/bar")),
+            Err(PathError::NotRelative(_))
+        ));
+    }
+
+    #[test]
+    fn root_relative_path_rejects_empty() {
+        assert!(matches!(
+            RootRelativePath::new(PathBuf::new()),
+            Err(PathError::Empty)
+        ));
     }
 }

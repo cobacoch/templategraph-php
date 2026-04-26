@@ -2,6 +2,9 @@ use std::io;
 
 use thiserror::Error;
 
+use crate::parser::blade::ViewNameError;
+use crate::path::PathError;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Error)]
@@ -17,6 +20,12 @@ pub enum Error {
 
     #[error("dependency resolution error: {0}")]
     Resolve(String),
+
+    #[error("path error: {0}")]
+    Path(#[from] PathError),
+
+    #[error("view name error: {0}")]
+    ViewName(#[from] ViewNameError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
