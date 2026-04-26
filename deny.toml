@@ -4,6 +4,8 @@ all-features = true
 [advisories]
 yanked = "deny"
 
+# YAGNI: only allow licenses that the current dependency graph actually
+# requires. Add new entries individually when a real dependency demands one.
 [licenses]
 allow = [
     "MIT",
