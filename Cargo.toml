@@ -12,3 +12,4 @@ keywords = ["php", "template", "graph", "include", "static-site"]
 categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
+thiserror = "2"
