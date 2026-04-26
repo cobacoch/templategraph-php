@@ -1007,7 +1007,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "cucumber",
- "futures",
+ "futures-executor",
  "insta",
  "thiserror",
 ]

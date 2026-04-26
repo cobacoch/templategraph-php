@@ -10,5 +10,5 @@ fn placeholder(_world: &mut ExampleWorld) {}
 fn loads(_world: &mut ExampleWorld) {}
 
 fn main() {
-    futures::executor::block_on(ExampleWorld::run("tests/features"));
+    futures_executor::block_on(ExampleWorld::run("tests/features"));
 }
