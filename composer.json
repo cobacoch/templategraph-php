@@ -24,6 +24,8 @@
             "/.gitattributes",
             "/Cargo.lock",
             "/Cargo.toml",
+            "/about.hbs",
+            "/about.toml",
             "/fixtures",
             "/src",
             "/target",
