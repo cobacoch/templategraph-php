@@ -1006,6 +1006,7 @@ name = "templategraph-php"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "clap",
  "cucumber",
  "futures-executor",
  "insta",
