@@ -32,3 +32,17 @@ fn scan_with_entrypoint_returns_not_implemented() {
         .failure()
         .code(1);
 }
+
+#[test]
+fn scan_with_unreadable_config_fails() {
+    templategraph()
+        .args([
+            "scan",
+            "--config",
+            "/nonexistent/templategraph.toml",
+            "public/index.php",
+        ])
+        .assert()
+        .failure()
+        .code(1);
+}
