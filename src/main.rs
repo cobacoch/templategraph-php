@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod error;
+mod graph;
 mod output;
 mod parser;
 mod path;

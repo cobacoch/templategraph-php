@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod in_memory;
+
 use crate::error::Result;
 use crate::path::AbsolutePath;
 
