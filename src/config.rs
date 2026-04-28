@@ -4,7 +4,13 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::output::Format;
+
+// Unknown fields are rejected to surface user typos. The `[php]` and `[blade]`
+// sections documented in docs/08-config.md will be opted in when those
+// features land (MVP+1).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
     pub root: Option<PathBuf>,
@@ -20,26 +26,31 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OutputConfig {
     #[serde(default)]
-    pub default_format: Option<String>,
+    pub default_format: Option<Format>,
 }
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    #[error("failed to read config file {path:?}: {source}")]
+    #[error("failed to read config file {}: {source}", path.display())]
     Read {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
 
-    #[error("failed to parse config: {0}")]
-    Parse(#[from] toml::de::Error),
+    #[error("failed to parse config file {}: {source}", path.display())]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
 }
 
-pub fn parse(content: &str) -> Result<Config, ConfigError> {
-    Ok(toml::from_str(content)?)
+pub fn parse(content: &str) -> Result<Config, toml::de::Error> {
+    toml::from_str(content)
 }
 
 pub fn load(path: &Path) -> Result<Config, ConfigError> {
@@ -47,7 +58,10 @@ pub fn load(path: &Path) -> Result<Config, ConfigError> {
         path: path.to_path_buf(),
         source,
     })?;
-    parse(&content)
+    parse(&content).map_err(|source| ConfigError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 #[cfg(test)]
@@ -74,7 +88,7 @@ default_format = "dot"
             ]
         );
         assert_eq!(config.exclude, vec!["vendor", "node_modules"]);
-        assert_eq!(config.output.default_format.as_deref(), Some("dot"));
+        assert_eq!(config.output.default_format, Some(Format::Dot));
     }
 
     #[test]
@@ -93,8 +107,36 @@ default_format = "dot"
     }
 
     #[test]
+    fn parse_accepts_json_format() {
+        let config = parse(r#"output = { default_format = "json" }"#).unwrap();
+        assert_eq!(config.output.default_format, Some(Format::Json));
+    }
+
+    #[test]
     fn parse_rejects_invalid_toml() {
         let result = parse("not = = valid");
-        assert!(matches!(result, Err(ConfigError::Parse(_))));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_unknown_root_field() {
+        let result = parse(r#"unknown_key = "x""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_unknown_output_field() {
+        let result = parse(r#"
+[output]
+default_format = "dot"
+unexpected = true
+"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_invalid_format() {
+        let result = parse(r#"output = { default_format = "yaml" }"#);
+        assert!(result.is_err());
     }
 }
