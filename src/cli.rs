@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand};
+
+use crate::output::Format;
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
@@ -42,8 +44,3 @@ pub struct ScanArgs {
     pub verbose: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum Format {
-    Dot,
-    Json,
-}

@@ -4,6 +4,7 @@ use std::io;
 
 use thiserror::Error;
 
+use crate::config::ConfigError;
 use crate::parser::blade::ViewNameError;
 use crate::path::PathError;
 
@@ -12,7 +13,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("config error: {0}")]
-    Config(String),
+    Config(#[from] ConfigError),
 
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
