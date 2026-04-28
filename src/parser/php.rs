@@ -19,8 +19,8 @@ pub struct RawIncludeDirective {
 
 #[derive(Debug, Error)]
 pub enum ParseError {
-    #[error("failed to set tree-sitter PHP language")]
-    Language,
+    #[error("failed to set tree-sitter PHP language: {0}")]
+    Language(#[from] tree_sitter::LanguageError),
 
     #[error("failed to parse PHP source")]
     Parse,
@@ -28,9 +28,7 @@ pub enum ParseError {
 
 pub fn extract_include_directives(source: &str) -> Result<Vec<RawIncludeDirective>, ParseError> {
     let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_php::LANGUAGE_PHP.into())
-        .map_err(|_| ParseError::Language)?;
+    parser.set_language(&tree_sitter_php::LANGUAGE_PHP.into())?;
     let tree = parser.parse(source, None).ok_or(ParseError::Parse)?;
     let mut directives = Vec::new();
     walk(tree.root_node(), source.as_bytes(), &mut directives);
@@ -109,6 +107,7 @@ require_once 'init.php';
         let directives = extract_include_directives(source).unwrap();
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].kind, IncludeKind::Include);
+        assert_eq!(directives[0].argument_source, "('header.php')");
     }
 
     #[test]
