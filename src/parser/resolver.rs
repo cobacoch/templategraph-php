@@ -1,3 +1,19 @@
+//! Resolves the static argument of an `include` / `require` directive into a
+//! filesystem path.
+//!
+//! MVP scope notes:
+//!
+//! - String literals are stripped of their surrounding quotes but not
+//!   otherwise interpreted. Any backslash inside the literal (`\'`, `\\`,
+//!   `\n`, …) is reported as unresolved rather than expanded — real-world
+//!   template include paths almost never need escape sequences, so the
+//!   resolver avoids the cost and bug surface of a hand-rolled string parser
+//!   and instead surfaces such cases for the unresolved-dependencies report.
+//! - Path concatenation joins evaluated parts with simple string append and
+//!   assumes `/` as the separator (Unix-first MVP). The graph builder is
+//!   responsible for normalizing the resulting paths against the project
+//!   root.
+
 #![allow(dead_code)]
 
 use std::path::PathBuf;
@@ -77,33 +93,40 @@ fn evaluate(node: Node<'_>, source: &[u8], current_file: &AbsolutePath) -> Resul
 
 fn evaluate_string(node: Node<'_>, source: &[u8]) -> Result<String, String> {
     let text = node.utf8_text(source).map_err(|e| e.to_string())?;
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() < 2 {
+    let bytes = text.as_bytes();
+    if bytes.len() < 2 {
         return Err(format!("string literal too short: {}", text));
     }
-    let first = chars[0];
-    let last = chars[chars.len() - 1];
-    if (first == '\'' && last == '\'') || (first == '"' && last == '"') {
-        Ok(chars[1..chars.len() - 1].iter().collect())
-    } else {
-        Err(format!("not a quoted string literal: {}", text))
+    let first = bytes[0];
+    let last = bytes[bytes.len() - 1];
+    if !((first == b'\'' && last == b'\'') || (first == b'"' && last == b'"')) {
+        return Err(format!("not a quoted string literal: {}", text));
     }
+    let inner = &text[1..text.len() - 1];
+    if inner.contains('\\') {
+        return Err("string literal with escape sequences is not supported".to_string());
+    }
+    Ok(inner.to_string())
 }
 
 fn evaluate_encapsed_string(node: Node<'_>, source: &[u8]) -> Result<String, String> {
     // The MVP only handles literal-only double-quoted strings. Any `$`
-    // inside the literal indicates variable interpolation and is reported
-    // as unresolved so the resolver does not silently produce a wrong path.
+    // inside the literal indicates variable interpolation and any `\`
+    // indicates an escape sequence; both are reported as unresolved so the
+    // resolver does not silently produce a wrong path.
     let text = node.utf8_text(source).map_err(|e| e.to_string())?;
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() < 2 || chars[0] != '"' || chars[chars.len() - 1] != '"' {
+    let bytes = text.as_bytes();
+    if bytes.len() < 2 || bytes[0] != b'"' || bytes[bytes.len() - 1] != b'"' {
         return Err(format!("not a double-quoted string literal: {}", text));
     }
-    let inner: String = chars[1..chars.len() - 1].iter().collect();
+    let inner = &text[1..text.len() - 1];
     if inner.contains('$') {
         return Err("double-quoted string with interpolation is not supported".to_string());
     }
-    Ok(inner)
+    if inner.contains('\\') {
+        return Err("double-quoted string with escape sequences is not supported".to_string());
+    }
+    Ok(inner.to_string())
 }
 
 fn evaluate_name(
@@ -291,5 +314,24 @@ mod tests {
     fn unresolved_double_quoted_with_interpolation() {
         let r = resolve(&directive(r#""dir/$file.php""#), &current_file());
         assert!(matches!(r, Resolved::Unresolved { .. }));
+    }
+
+    #[test]
+    fn unresolved_single_quoted_with_escape() {
+        let r = resolve(&directive(r"'it\'s.php'"), &current_file());
+        assert!(matches!(r, Resolved::Unresolved { .. }));
+    }
+
+    #[test]
+    fn unresolved_double_quoted_with_escape() {
+        let r = resolve(&directive(r#""a\\b.php""#), &current_file());
+        assert!(matches!(r, Resolved::Unresolved { .. }));
+    }
+
+    #[test]
+    fn resolves_dir_constant_at_filesystem_root() {
+        let root_file = AbsolutePath::new(PathBuf::from("/index.php")).unwrap();
+        let r = resolve(&directive("__DIR__"), &root_file);
+        assert_eq!(r, Resolved::Path(PathBuf::from("/")));
     }
 }
