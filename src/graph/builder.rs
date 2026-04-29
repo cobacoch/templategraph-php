@@ -35,7 +35,18 @@ pub fn build_graph(
                 // A missing include target is recorded as Unresolved so the
                 // rest of the graph can still be built.
                 if !is_entrypoint && is_not_found(&e) {
-                    graph.nodes.push(missing_file_node(&id, &file));
+                    // Rewrite the parent's edge target to the namespaced
+                    // missing-file id so all unresolved nodes share a single
+                    // `unresolved::` id scheme. The edge `kind` is left as
+                    // the original include kind to preserve the PHP-level
+                    // information; output layers can re-classify if desired.
+                    let missing_id = missing_file_id(&file);
+                    for edge in graph.edges.iter_mut() {
+                        if edge.to == id {
+                            edge.to = missing_id.clone();
+                        }
+                    }
+                    graph.nodes.push(missing_file_node(&missing_id, &file));
                     continue;
                 }
                 return Err(e);
@@ -72,8 +83,16 @@ pub fn build_graph(
     Ok(graph)
 }
 
+// Only `NotFound` is treated as recoverable for include targets in the MVP.
+// Other I/O errors (`PermissionDenied`, `IsADirectory`, `InvalidData` for
+// non-UTF-8 content, etc.) are propagated as fatal so misconfigurations are
+// visible rather than silently dropped. Future work may broaden this set.
 fn is_not_found(error: &Error) -> bool {
     matches!(error, Error::Io(io_err) if io_err.kind() == io::ErrorKind::NotFound)
+}
+
+fn missing_file_id(file: &AbsolutePath) -> NodeId {
+    format!("unresolved::missing::{}", file.as_path().display())
 }
 
 fn missing_file_node(id: &NodeId, file: &AbsolutePath) -> Node {
@@ -405,8 +424,14 @@ include __DIR__ . '/../../project/b/c.php';
         assert!(unresolved.absolute_path.is_none());
         assert!(unresolved.display_name.contains("file not found"));
         assert!(unresolved.display_name.contains("/project/missing.php"));
+        assert_eq!(unresolved.id, "unresolved::missing::/project/missing.php");
+
         assert_eq!(graph.edges.len(), 1);
+        // Edge kind preserves the original PHP include kind even though the
+        // target is unresolved.
         assert_eq!(graph.edges[0].kind, EdgeKind::Include);
+        // Edge target uses the namespaced unresolved id, matching the node.
+        assert_eq!(graph.edges[0].to, unresolved.id);
     }
 
     #[test]
