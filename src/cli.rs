@@ -19,13 +19,14 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct ScanArgs {
-    /// One or more entrypoint PHP files to start the scan from.
-    #[arg(required = true)]
+    /// One or more entrypoint PHP files to start the scan from. Falls back to
+    /// `entrypoints` in `templategraph.toml` if none are given.
     pub entrypoints: Vec<PathBuf>,
 
-    /// Output format.
-    #[arg(long, value_enum, default_value_t = Format::Dot)]
-    pub format: Format,
+    /// Output format. Falls back to `[output] default_format` in
+    /// `templategraph.toml`, then to `dot`.
+    #[arg(long, value_enum)]
+    pub format: Option<Format>,
 
     /// Write output to the given file instead of stdout.
     #[arg(long)]

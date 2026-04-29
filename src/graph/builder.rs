@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::graph::model::{Edge, EdgeKind, Graph, Node, NodeId, NodeKind};
 use crate::parser::php::{self, RawIncludeDirective};
 use crate::parser::resolver::{self, Resolved};
-use crate::path::{AbsolutePath, RootRelativePath};
+use crate::path::{self, AbsolutePath, RootRelativePath};
 use crate::scanner::FileReader;
 
 pub fn build_graph(
@@ -180,26 +180,7 @@ fn absolutize(path: &Path, current_file: &AbsolutePath) -> AbsolutePath {
             .unwrap_or_else(|| PathBuf::from("/"));
         parent.join(path)
     };
-    let normalized = normalize_path(&joined);
-    AbsolutePath::new(normalized).expect("absolute by construction")
-}
-
-// Collapse `.` / `..` segments without touching the filesystem so that the
-// same physical file reached via different syntactic paths shares a single
-// node id.
-fn normalize_path(path: &Path) -> PathBuf {
-    use std::path::Component;
-    let mut result = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::ParentDir => {
-                result.pop();
-            }
-            Component::CurDir => {}
-            other => result.push(other.as_os_str()),
-        }
-    }
-    result
+    AbsolutePath::new(path::normalize(&joined)).expect("absolute by construction")
 }
 
 #[cfg(test)]

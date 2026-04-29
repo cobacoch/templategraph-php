@@ -278,6 +278,22 @@ require_once __DIR__ . '/d.php';
     }
 
     #[test]
+    fn snapshot_cycle_does_not_loop() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/a.php",
+            r#"<?php include __DIR__ . '/b.php';"#,
+        );
+        reader.add(
+            "/project/b.php",
+            r#"<?php include __DIR__ . '/a.php';"#,
+        );
+
+        let graph = build_graph(&[entry("/project/a.php")], &root(), &reader).unwrap();
+        insta::assert_snapshot!(render(&graph));
+    }
+
+    #[test]
     fn snapshot_multiple_entrypoints_share_node() {
         let mut reader = InMemoryFileReader::new();
         reader.add(

@@ -104,3 +104,101 @@ fn scan_with_format_json_reports_not_implemented() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("--format json is not yet implemented"));
 }
+
+#[test]
+fn scan_with_valid_config_but_missing_entrypoint_fails_at_io_layer() {
+    // The config loads cleanly; the failure must come from the entrypoint
+    // I/O layer, not from a config-error short-circuit.
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("templategraph.toml");
+    fs::write(&config_path, b"").unwrap();
+    let missing = dir.path().join("nonexistent.php");
+
+    let output = templategraph()
+        .args(["scan", "--config"])
+        .arg(&config_path)
+        .arg(&missing)
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        !stderr.contains("config error"),
+        "expected an I/O-layer error, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn scan_uses_entrypoints_from_config_when_cli_omits_them() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("index.php"),
+        b"<?php include __DIR__ . '/header.php';",
+    )
+    .unwrap();
+    fs::write(dir.path().join("header.php"), b"<?php echo 'header';").unwrap();
+    let config_path = dir.path().join("templategraph.toml");
+    fs::write(&config_path, b"entrypoints = [\"index.php\"]\n").unwrap();
+
+    let output = templategraph()
+        .args(["scan", "--root"])
+        .arg(dir.path())
+        .args(["--config"])
+        .arg(&config_path)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("[label=\"index.php\", shape=doubleoctagon]"));
+    assert!(stdout.contains("[label=\"header.php\"]"));
+}
+
+#[test]
+fn scan_uses_default_format_from_config() {
+    // When the config requests json (currently unimplemented), the CLI should
+    // still honor that selection rather than silently falling back to dot.
+    let dir = tempfile::tempdir().unwrap();
+    let index = dir.path().join("index.php");
+    fs::write(&index, b"<?php echo 'hi';").unwrap();
+    let config_path = dir.path().join("templategraph.toml");
+    fs::write(
+        &config_path,
+        b"[output]\ndefault_format = \"json\"\n",
+    )
+    .unwrap();
+
+    let output = templategraph()
+        .args(["scan", "--config"])
+        .arg(&config_path)
+        .arg(&index)
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("--format json is not yet implemented"));
+}
+
+#[test]
+fn scan_with_no_entrypoints_anywhere_reports_clear_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("templategraph.toml");
+    fs::write(&config_path, b"").unwrap();
+
+    let output = templategraph()
+        .args(["scan", "--config"])
+        .arg(&config_path)
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("no entrypoints"));
+}
