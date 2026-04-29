@@ -1,0 +1,14 @@
+---
+source: src/output/dot.rs
+assertion_line: 265
+expression: render(&graph)
+---
+digraph templategraph {
+    rankdir=LR;
+    node [shape=box];
+
+    "/project/index.php" [label="index.php", shape=doubleoctagon];
+    "unresolved::$dynamic" [label="unresolved: $dynamic", style=dashed];
+
+    "/project/index.php" -> "unresolved::$dynamic" [label="unresolved", style=dashed];
+}

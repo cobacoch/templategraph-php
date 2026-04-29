@@ -1,0 +1,14 @@
+---
+source: src/output/dot.rs
+assertion_line: 277
+expression: render(&graph)
+---
+digraph templategraph {
+    rankdir=LR;
+    node [shape=box];
+
+    "/project/index.php" [label="index.php", shape=doubleoctagon];
+    "unresolved::missing::/project/missing.php" [label="unresolved: file not found /project/missing.php", style=dashed];
+
+    "/project/index.php" -> "unresolved::missing::/project/missing.php" [label="include"];
+}

@@ -1,3 +1,5 @@
+pub mod dot;
+
 use clap::ValueEnum;
 use serde::Deserialize;
 
