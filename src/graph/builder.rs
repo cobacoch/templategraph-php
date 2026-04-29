@@ -1,7 +1,8 @@
 use std::collections::{HashSet, VecDeque};
+use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::graph::model::{Edge, EdgeKind, Graph, Node, NodeId, NodeKind};
 use crate::parser::php::{self, RawIncludeDirective};
 use crate::parser::resolver::{self, Resolved};
@@ -27,6 +28,20 @@ pub fn build_graph(
             continue;
         }
 
+        let source = match file_reader.read_to_string(&file) {
+            Ok(s) => s,
+            Err(e) => {
+                // A missing entrypoint is fatal — the user explicitly named it.
+                // A missing include target is recorded as Unresolved so the
+                // rest of the graph can still be built.
+                if !is_entrypoint && is_not_found(&e) {
+                    graph.nodes.push(missing_file_node(&id, &file));
+                    continue;
+                }
+                return Err(e);
+            }
+        };
+
         let kind = if is_entrypoint {
             NodeKind::Entry
         } else {
@@ -41,7 +56,6 @@ pub fn build_graph(
             is_entrypoint,
         });
 
-        let source = file_reader.read_to_string(&file)?;
         let directives = match php::extract_include_directives(&source) {
             Ok(ds) => ds,
             // Tree-sitter is error-tolerant, so this branch is effectively
@@ -56,6 +70,21 @@ pub fn build_graph(
     }
 
     Ok(graph)
+}
+
+fn is_not_found(error: &Error) -> bool {
+    matches!(error, Error::Io(io_err) if io_err.kind() == io::ErrorKind::NotFound)
+}
+
+fn missing_file_node(id: &NodeId, file: &AbsolutePath) -> Node {
+    Node {
+        id: id.clone(),
+        absolute_path: None,
+        root_relative_path: None,
+        kind: NodeKind::Unresolved,
+        display_name: format!("unresolved: file not found {}", file.as_path().display()),
+        is_entrypoint: false,
+    }
 }
 
 fn handle_directive(
@@ -355,6 +384,36 @@ include __DIR__ . '/../../project/b/c.php';
             .id
             .clone();
         assert!(graph.edges.iter().all(|e| e.to == target_id));
+    }
+
+    #[test]
+    fn missing_include_target_becomes_unresolved_node() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/index.php",
+            r#"<?php include __DIR__ . '/missing.php';"#,
+        );
+
+        let graph = build_graph(&[entry("/project/index.php")], &root(), &reader).unwrap();
+
+        assert_eq!(graph.nodes.len(), 2);
+        let unresolved = graph
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Unresolved)
+            .unwrap();
+        assert!(unresolved.absolute_path.is_none());
+        assert!(unresolved.display_name.contains("file not found"));
+        assert!(unresolved.display_name.contains("/project/missing.php"));
+        assert_eq!(graph.edges.len(), 1);
+        assert_eq!(graph.edges[0].kind, EdgeKind::Include);
+    }
+
+    #[test]
+    fn missing_entrypoint_propagates_error() {
+        let reader = InMemoryFileReader::new();
+        let result = build_graph(&[entry("/project/missing-entry.php")], &root(), &reader);
+        assert!(matches!(result, Err(Error::Io(_))));
     }
 
     #[test]

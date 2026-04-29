@@ -24,6 +24,7 @@ assert_cmd = "2"
 cucumber = "0.23"
 futures-executor = "0.3"
 insta = "1"
+tempfile = "3"
 
 [[test]]
 name = "cucumber"

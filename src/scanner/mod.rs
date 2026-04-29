@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod filesystem;
 pub mod in_memory;
 
 use crate::error::Result;
