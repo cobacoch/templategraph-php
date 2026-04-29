@@ -122,16 +122,36 @@ fn display_name(file: &AbsolutePath, root: &AbsolutePath) -> String {
 }
 
 fn absolutize(path: &Path, current_file: &AbsolutePath) -> AbsolutePath {
-    if path.is_absolute() {
-        AbsolutePath::new(path.to_path_buf()).expect("path is absolute by precondition")
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
     } else {
         let parent = current_file
             .as_path()
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("/"));
-        AbsolutePath::new(parent.join(path)).expect("absolute parent + relative path")
+        parent.join(path)
+    };
+    let normalized = normalize_path(&joined);
+    AbsolutePath::new(normalized).expect("absolute by construction")
+}
+
+// Collapse `.` / `..` segments without touching the filesystem so that the
+// same physical file reached via different syntactic paths shares a single
+// node id.
+fn normalize_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                result.pop();
+            }
+            Component::CurDir => {}
+            other => result.push(other.as_os_str()),
+        }
     }
+    result
 }
 
 #[cfg(test)]
@@ -290,6 +310,51 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn dotdot_in_path_is_normalized() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/a/x.php",
+            r#"<?php include __DIR__ . '/../b/c.php';"#,
+        );
+        reader.add("/project/b/c.php", "<?php echo 'c';");
+
+        let graph = build_graph(&[entry("/project/a/x.php")], &root(), &reader).unwrap();
+
+        assert_eq!(graph.nodes.len(), 2);
+        let target = graph.nodes.iter().find(|n| !n.is_entrypoint).unwrap();
+        assert_eq!(
+            target.absolute_path.as_ref().unwrap().as_path(),
+            Path::new("/project/b/c.php")
+        );
+    }
+
+    #[test]
+    fn same_file_via_different_paths_dedupes_to_one_node() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/a/x.php",
+            r#"<?php
+include __DIR__ . '/../b/c.php';
+include __DIR__ . '/../../project/b/c.php';
+"#,
+        );
+        reader.add("/project/b/c.php", "<?php echo 'c';");
+
+        let graph = build_graph(&[entry("/project/a/x.php")], &root(), &reader).unwrap();
+
+        assert_eq!(graph.nodes.len(), 2);
+        assert_eq!(graph.edges.len(), 2);
+        let target_id = graph
+            .nodes
+            .iter()
+            .find(|n| !n.is_entrypoint)
+            .unwrap()
+            .id
+            .clone();
+        assert!(graph.edges.iter().all(|e| e.to == target_id));
     }
 
     #[test]
