@@ -1,0 +1,15 @@
+---
+source: src/output/dot.rs
+assertion_line: 293
+expression: render(&graph)
+---
+digraph templategraph {
+    rankdir=LR;
+    node [shape=box];
+
+    "/project/a.php" [label="a.php", shape=doubleoctagon];
+    "/project/b.php" [label="b.php"];
+
+    "/project/a.php" -> "/project/b.php" [label="include"];
+    "/project/b.php" -> "/project/a.php" [label="include"];
+}
