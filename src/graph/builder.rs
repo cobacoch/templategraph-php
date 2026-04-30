@@ -9,6 +9,41 @@ use crate::parser::resolver::{self, Resolved};
 use crate::path::{self, AbsolutePath, RootRelativePath};
 use crate::scanner::FileReader;
 
+// Reads each file and returns the set of include targets that resolve to
+// concrete absolute paths. Used by the CLI to detect which candidates in a
+// directory walk are themselves included by another candidate, so those can
+// be demoted from the auto-discovered entrypoint set.
+//
+// Files that fail to read or parse are silently skipped: the caller is
+// passing in candidates from a successful walk, so transient read errors
+// are best treated as "no known includes" (which keeps the file as an
+// entrypoint candidate — the conservative outcome).
+pub fn collect_include_targets(
+    files: &[AbsolutePath],
+    project_root: &AbsolutePath,
+    file_reader: &dyn FileReader,
+) -> HashSet<AbsolutePath> {
+    let mut targets = HashSet::new();
+    for file in files {
+        let Ok(source) = file_reader.read_to_string(file) else {
+            continue;
+        };
+        let Ok(directives) = php::extract_include_directives(&source) else {
+            continue;
+        };
+        let ctx = resolver::Context {
+            current_file: file,
+            document_root: project_root,
+        };
+        for directive in &directives {
+            if let Resolved::Path(p) = resolver::resolve(directive, &ctx) {
+                targets.insert(absolutize(&p, file));
+            }
+        }
+    }
+    targets
+}
+
 pub fn build_graph(
     entrypoints: &[AbsolutePath],
     project_root: &AbsolutePath,
@@ -76,7 +111,7 @@ pub fn build_graph(
         };
 
         for directive in &directives {
-            handle_directive(directive, &file, &id, &mut graph, &mut queue);
+            handle_directive(directive, &file, project_root, &id, &mut graph, &mut queue);
         }
     }
 
@@ -109,11 +144,16 @@ fn missing_file_node(id: &NodeId, file: &AbsolutePath) -> Node {
 fn handle_directive(
     directive: &RawIncludeDirective,
     current_file: &AbsolutePath,
+    project_root: &AbsolutePath,
     from_id: &NodeId,
     graph: &mut Graph,
     queue: &mut VecDeque<(AbsolutePath, bool)>,
 ) {
-    match resolver::resolve(directive, current_file) {
+    let ctx = resolver::Context {
+        current_file,
+        document_root: project_root,
+    };
+    match resolver::resolve(directive, &ctx) {
         Resolved::Path(path) => {
             let target = absolutize(&path, current_file);
             let target_id = node_id_for(&target);
@@ -445,5 +485,90 @@ include __DIR__ . '/../../project/b/c.php';
             .unwrap();
         assert!(external.root_relative_path.is_none());
         assert_eq!(external.display_name, "/external/lib.php");
+    }
+
+    #[test]
+    fn collect_include_targets_returns_resolved_targets_only() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/index.php",
+            r#"<?php
+include __DIR__ . '/header.php';
+include $dynamic;
+"#,
+        );
+        reader.add("/project/header.php", "<?php");
+
+        let targets =
+            collect_include_targets(&[entry("/project/index.php")], &root(), &reader);
+        assert_eq!(targets.len(), 1);
+        assert!(targets.contains(&entry("/project/header.php")));
+    }
+
+    #[test]
+    fn collect_include_targets_unions_across_files() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/a.php",
+            r#"<?php include __DIR__ . '/shared.php';"#,
+        );
+        reader.add(
+            "/project/b.php",
+            r#"<?php include __DIR__ . '/shared.php';"#,
+        );
+        reader.add(
+            "/project/c.php",
+            r#"<?php include __DIR__ . '/other.php';"#,
+        );
+        reader.add("/project/shared.php", "<?php");
+        reader.add("/project/other.php", "<?php");
+
+        let targets = collect_include_targets(
+            &[
+                entry("/project/a.php"),
+                entry("/project/b.php"),
+                entry("/project/c.php"),
+            ],
+            &root(),
+            &reader,
+        );
+        assert_eq!(targets.len(), 2);
+        assert!(targets.contains(&entry("/project/shared.php")));
+        assert!(targets.contains(&entry("/project/other.php")));
+    }
+
+    #[test]
+    fn collect_include_targets_skips_unreadable_files() {
+        let mut reader = InMemoryFileReader::new();
+        // /project/a.php is not added → read fails → that file contributes
+        // nothing, but the loop continues with the rest.
+        reader.add(
+            "/project/b.php",
+            r#"<?php include __DIR__ . '/c.php';"#,
+        );
+        reader.add("/project/c.php", "<?php");
+
+        let targets = collect_include_targets(
+            &[entry("/project/a.php"), entry("/project/b.php")],
+            &root(),
+            &reader,
+        );
+        assert_eq!(targets.len(), 1);
+        assert!(targets.contains(&entry("/project/c.php")));
+    }
+
+    #[test]
+    fn collect_include_targets_resolves_server_document_root() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/page.php",
+            r#"<?php include $_SERVER['DOCUMENT_ROOT'] . "/inc/header.php";"#,
+        );
+        reader.add("/project/inc/header.php", "<?php");
+
+        let targets =
+            collect_include_targets(&[entry("/project/page.php")], &root(), &reader);
+        assert_eq!(targets.len(), 1);
+        assert!(targets.contains(&entry("/project/inc/header.php")));
     }
 }

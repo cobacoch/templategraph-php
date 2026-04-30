@@ -202,3 +202,120 @@ fn scan_with_no_entrypoints_anywhere_reports_clear_error() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("no entrypoints"));
 }
+
+// Helper for the directory-walking tests below.
+fn write_at(dir: &std::path::Path, rel: &str, content: &[u8]) {
+    let path = dir.join(rel);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(path, content).unwrap();
+}
+
+#[test]
+fn scan_walks_directory_and_demotes_included_files() {
+    let dir = tempfile::tempdir().unwrap();
+    write_at(
+        dir.path(),
+        "index.php",
+        b"<?php include __DIR__ . '/inc/header.php';",
+    );
+    write_at(
+        dir.path(),
+        "about.php",
+        b"<?php include __DIR__ . '/inc/header.php';",
+    );
+    write_at(dir.path(), "inc/header.php", b"<?php echo 'header';");
+
+    let output = templategraph()
+        .arg("scan")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    // `index.php` and `about.php` are page-level → entrypoints.
+    assert!(stdout.contains(r#"[label="about.php", shape=doubleoctagon]"#));
+    assert!(stdout.contains(r#"[label="index.php", shape=doubleoctagon]"#));
+    // `inc/header.php` is included by both → demoted to a non-entry node.
+    assert!(stdout.contains(r#"[label="inc/header.php"];"#));
+    assert!(!stdout.contains(r#"[label="inc/header.php", shape=doubleoctagon]"#));
+}
+
+#[test]
+fn scan_resolves_server_document_root_against_inferred_root() {
+    // No `--root`: the directory entrypoint is taken as the document root,
+    // and `$_SERVER['DOCUMENT_ROOT']` resolves against it. The included
+    // `inc/header.php` should therefore be demoted from the entrypoint set.
+    let dir = tempfile::tempdir().unwrap();
+    write_at(
+        dir.path(),
+        "page.php",
+        b"<?php include $_SERVER['DOCUMENT_ROOT'] . \"/inc/header.php\";",
+    );
+    write_at(dir.path(), "inc/header.php", b"<?php echo 'header';");
+
+    let output = templategraph()
+        .arg("scan")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(r#"[label="page.php", shape=doubleoctagon]"#));
+    assert!(stdout.contains(r#"[label="inc/header.php"];"#));
+    assert!(!stdout.contains(r#"[label="inc/header.php", shape=doubleoctagon]"#));
+    // No unresolved nodes — the include resolved cleanly.
+    assert!(!stdout.contains("unresolved"));
+}
+
+#[test]
+fn scan_directory_skips_excluded_dirs_via_config() {
+    let dir = tempfile::tempdir().unwrap();
+    write_at(dir.path(), "index.php", b"<?php echo 'top';");
+    write_at(dir.path(), "vendor/lib.php", b"<?php echo 'should be excluded';");
+    let config_path = dir.path().join("templategraph.toml");
+    fs::write(&config_path, b"exclude = [\"vendor\"]\n").unwrap();
+
+    let output = templategraph()
+        .args(["scan", "--config"])
+        .arg(&config_path)
+        .arg(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(r#"[label="index.php", shape=doubleoctagon]"#));
+    assert!(!stdout.contains("vendor/lib.php"));
+}
+
+#[test]
+fn scan_directory_with_no_php_files_reports_clear_error() {
+    let dir = tempfile::tempdir().unwrap();
+    write_at(dir.path(), "readme.md", b"hello");
+
+    let output = templategraph()
+        .arg("scan")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("no PHP entrypoints"));
+}

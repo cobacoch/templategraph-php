@@ -32,7 +32,17 @@ pub enum Resolved {
     },
 }
 
-pub fn resolve(directive: &RawIncludeDirective, current_file: &AbsolutePath) -> Resolved {
+// Context bundles the per-call inputs that propagate through the recursive
+// `evaluate` walk: the file owning the include directive (used to resolve
+// `__FILE__` / `__DIR__`) and the document root (used to resolve
+// `$_SERVER['DOCUMENT_ROOT']`, the conventional pattern in PHP static sites
+// for anchoring includes at the public webroot).
+pub struct Context<'a> {
+    pub current_file: &'a AbsolutePath,
+    pub document_root: &'a AbsolutePath,
+}
+
+pub fn resolve(directive: &RawIncludeDirective, ctx: &Context<'_>) -> Resolved {
     let wrapped = format!("<?php {};", directive.argument_source);
 
     let mut parser = Parser::new();
@@ -51,7 +61,7 @@ pub fn resolve(directive: &RawIncludeDirective, current_file: &AbsolutePath) -> 
         return unresolved(directive, "argument expression not found");
     };
 
-    match evaluate(expr, wrapped.as_bytes(), current_file) {
+    match evaluate(expr, wrapped.as_bytes(), ctx) {
         Ok(value) => Resolved::Path(PathBuf::from(value)),
         Err(reason) => unresolved(directive, &reason),
     }
@@ -74,18 +84,19 @@ fn find_argument_expression(root: Node<'_>) -> Option<Node<'_>> {
     None
 }
 
-fn evaluate(node: Node<'_>, source: &[u8], current_file: &AbsolutePath) -> Result<String, String> {
+fn evaluate(node: Node<'_>, source: &[u8], ctx: &Context<'_>) -> Result<String, String> {
     match node.kind() {
         "string" => evaluate_string(node, source),
         "encapsed_string" => evaluate_encapsed_string(node, source),
-        "name" => evaluate_name(node, source, current_file),
-        "binary_expression" => evaluate_binary(node, source, current_file),
-        "function_call_expression" => evaluate_function_call(node, source, current_file),
+        "name" => evaluate_name(node, source, ctx.current_file),
+        "binary_expression" => evaluate_binary(node, source, ctx),
+        "function_call_expression" => evaluate_function_call(node, source, ctx),
+        "subscript_expression" => evaluate_subscript(node, source, ctx.document_root),
         "parenthesized_expression" => {
             let inner = node
                 .named_child(0)
                 .ok_or_else(|| "empty parenthesized expression".to_string())?;
-            evaluate(inner, source, current_file)
+            evaluate(inner, source, ctx)
         }
         kind => Err(format!("unsupported expression kind: {}", kind)),
     }
@@ -149,7 +160,7 @@ fn evaluate_name(
 fn evaluate_binary(
     node: Node<'_>,
     source: &[u8],
-    current_file: &AbsolutePath,
+    ctx: &Context<'_>,
 ) -> Result<String, String> {
     let operator = node
         .child_by_field_name("operator")
@@ -165,15 +176,15 @@ fn evaluate_binary(
     let right = node
         .child_by_field_name("right")
         .ok_or_else(|| "binary expression has no right operand".to_string())?;
-    let left_value = evaluate(left, source, current_file)?;
-    let right_value = evaluate(right, source, current_file)?;
+    let left_value = evaluate(left, source, ctx)?;
+    let right_value = evaluate(right, source, ctx)?;
     Ok(format!("{}{}", left_value, right_value))
 }
 
 fn evaluate_function_call(
     node: Node<'_>,
     source: &[u8],
-    current_file: &AbsolutePath,
+    ctx: &Context<'_>,
 ) -> Result<String, String> {
     let function_name = node
         .child_by_field_name("function")
@@ -202,12 +213,48 @@ fn evaluate_function_call(
     } else {
         arg
     };
-    let arg_value = evaluate(arg_inner, source, current_file)?;
+    let arg_value = evaluate(arg_inner, source, ctx)?;
     let path = std::path::Path::new(&arg_value);
     let parent = path
         .parent()
         .ok_or_else(|| format!("dirname argument has no parent: {}", arg_value))?;
     Ok(parent.to_string_lossy().into_owned())
+}
+
+// Handles the conventional `$_SERVER['DOCUMENT_ROOT']` (or its double-quoted
+// variant). The substitution uses the configured project root because in a
+// PHP static-site layout the document root IS the project's public webroot,
+// and `--root` is the user-facing knob for that. Other `$_SERVER` keys
+// (`HTTP_HOST`, etc.) are reported as unresolved — they have no static value
+// at scan time.
+fn evaluate_subscript(
+    node: Node<'_>,
+    source: &[u8],
+    document_root: &AbsolutePath,
+) -> Result<String, String> {
+    let array_node = node
+        .named_child(0)
+        .ok_or_else(|| "subscript expression has no array operand".to_string())?;
+    let index_node = node
+        .named_child(1)
+        .ok_or_else(|| "subscript expression has no index".to_string())?;
+
+    let array_text = array_node.utf8_text(source).map_err(|e| e.to_string())?;
+    if array_text != "$_SERVER" {
+        return Err(format!("unsupported subscript array: {}", array_text));
+    }
+
+    let key = match index_node.kind() {
+        "string" => evaluate_string(index_node, source)?,
+        "encapsed_string" => evaluate_encapsed_string(index_node, source)?,
+        kind => return Err(format!("unsupported subscript index kind: {}", kind)),
+    };
+
+    if key == "DOCUMENT_ROOT" {
+        Ok(document_root.as_path().to_string_lossy().into_owned())
+    } else {
+        Err(format!("unsupported $_SERVER key: {}", key))
+    }
 }
 
 #[cfg(test)]
@@ -226,39 +273,61 @@ mod tests {
         AbsolutePath::new(PathBuf::from("/project/public/index.php")).unwrap()
     }
 
+    fn document_root() -> AbsolutePath {
+        AbsolutePath::new(PathBuf::from("/project/public")).unwrap()
+    }
+
+    fn ctx_for<'a>(file: &'a AbsolutePath, root: &'a AbsolutePath) -> Context<'a> {
+        Context {
+            current_file: file,
+            document_root: root,
+        }
+    }
+
+    fn ctx() -> Context<'static> {
+        // Leak two AbsolutePaths so tests get a 'static Context conveniently.
+        // Acceptable since each test process is short-lived.
+        let file: &'static AbsolutePath = Box::leak(Box::new(current_file()));
+        let root: &'static AbsolutePath = Box::leak(Box::new(document_root()));
+        Context {
+            current_file: file,
+            document_root: root,
+        }
+    }
+
     #[test]
     fn resolves_single_quoted_string_literal() {
-        let r = resolve(&directive("'header.php'"), &current_file());
+        let r = resolve(&directive("'header.php'"), &ctx());
         assert_eq!(r, Resolved::Path(PathBuf::from("header.php")));
     }
 
     #[test]
     fn resolves_double_quoted_string_literal() {
-        let r = resolve(&directive(r#""header.php""#), &current_file());
+        let r = resolve(&directive(r#""header.php""#), &ctx());
         assert_eq!(r, Resolved::Path(PathBuf::from("header.php")));
     }
 
     #[test]
     fn resolves_dir_constant() {
-        let r = resolve(&directive("__DIR__"), &current_file());
+        let r = resolve(&directive("__DIR__"), &ctx());
         assert_eq!(r, Resolved::Path(PathBuf::from("/project/public")));
     }
 
     #[test]
     fn resolves_file_constant() {
-        let r = resolve(&directive("__FILE__"), &current_file());
+        let r = resolve(&directive("__FILE__"), &ctx());
         assert_eq!(r, Resolved::Path(PathBuf::from("/project/public/index.php")));
     }
 
     #[test]
     fn resolves_dirname_file_call() {
-        let r = resolve(&directive("dirname(__FILE__)"), &current_file());
+        let r = resolve(&directive("dirname(__FILE__)"), &ctx());
         assert_eq!(r, Resolved::Path(PathBuf::from("/project/public")));
     }
 
     #[test]
     fn resolves_dir_with_concat() {
-        let r = resolve(&directive("__DIR__ . '/header.php'"), &current_file());
+        let r = resolve(&directive("__DIR__ . '/header.php'"), &ctx());
         assert_eq!(
             r,
             Resolved::Path(PathBuf::from("/project/public/header.php"))
@@ -267,13 +336,13 @@ mod tests {
 
     #[test]
     fn resolves_dirname_with_concat() {
-        let r = resolve(&directive("dirname(__FILE__) . '/lib.php'"), &current_file());
+        let r = resolve(&directive("dirname(__FILE__) . '/lib.php'"), &ctx());
         assert_eq!(r, Resolved::Path(PathBuf::from("/project/public/lib.php")));
     }
 
     #[test]
     fn resolves_parenthesized_concat() {
-        let r = resolve(&directive("(__DIR__ . '/header.php')"), &current_file());
+        let r = resolve(&directive("(__DIR__ . '/header.php')"), &ctx());
         assert_eq!(
             r,
             Resolved::Path(PathBuf::from("/project/public/header.php"))
@@ -282,7 +351,7 @@ mod tests {
 
     #[test]
     fn unresolved_variable() {
-        let r = resolve(&directive("$path"), &current_file());
+        let r = resolve(&directive("$path"), &ctx());
         match r {
             Resolved::Unresolved {
                 argument_source,
@@ -294,44 +363,93 @@ mod tests {
 
     #[test]
     fn unresolved_unknown_function() {
-        let r = resolve(&directive("realpath('foo')"), &current_file());
+        let r = resolve(&directive("realpath('foo')"), &ctx());
         assert!(matches!(r, Resolved::Unresolved { .. }));
     }
 
     #[test]
     fn unresolved_unsupported_operator() {
-        let r = resolve(&directive("'a' + 'b'"), &current_file());
+        let r = resolve(&directive("'a' + 'b'"), &ctx());
         assert!(matches!(r, Resolved::Unresolved { .. }));
     }
 
     #[test]
     fn unresolved_dirname_with_zero_args() {
-        let r = resolve(&directive("dirname()"), &current_file());
+        let r = resolve(&directive("dirname()"), &ctx());
         assert!(matches!(r, Resolved::Unresolved { .. }));
     }
 
     #[test]
     fn unresolved_double_quoted_with_interpolation() {
-        let r = resolve(&directive(r#""dir/$file.php""#), &current_file());
+        let r = resolve(&directive(r#""dir/$file.php""#), &ctx());
         assert!(matches!(r, Resolved::Unresolved { .. }));
     }
 
     #[test]
     fn unresolved_single_quoted_with_escape() {
-        let r = resolve(&directive(r"'it\'s.php'"), &current_file());
+        let r = resolve(&directive(r"'it\'s.php'"), &ctx());
         assert!(matches!(r, Resolved::Unresolved { .. }));
     }
 
     #[test]
     fn unresolved_double_quoted_with_escape() {
-        let r = resolve(&directive(r#""a\\b.php""#), &current_file());
+        let r = resolve(&directive(r#""a\\b.php""#), &ctx());
         assert!(matches!(r, Resolved::Unresolved { .. }));
     }
 
     #[test]
     fn resolves_dir_constant_at_filesystem_root() {
         let root_file = AbsolutePath::new(PathBuf::from("/index.php")).unwrap();
-        let r = resolve(&directive("__DIR__"), &root_file);
+        let root = document_root();
+        let r = resolve(&directive("__DIR__"), &ctx_for(&root_file, &root));
         assert_eq!(r, Resolved::Path(PathBuf::from("/")));
+    }
+
+    #[test]
+    fn resolves_server_document_root_single_quoted() {
+        let r = resolve(&directive("$_SERVER['DOCUMENT_ROOT']"), &ctx());
+        assert_eq!(r, Resolved::Path(PathBuf::from("/project/public")));
+    }
+
+    #[test]
+    fn resolves_server_document_root_double_quoted() {
+        let r = resolve(&directive(r#"$_SERVER["DOCUMENT_ROOT"]"#), &ctx());
+        assert_eq!(r, Resolved::Path(PathBuf::from("/project/public")));
+    }
+
+    #[test]
+    fn resolves_server_document_root_with_concat() {
+        let r = resolve(
+            &directive(r#"$_SERVER['DOCUMENT_ROOT'] . "/inc/header.php""#),
+            &ctx(),
+        );
+        assert_eq!(
+            r,
+            Resolved::Path(PathBuf::from("/project/public/inc/header.php"))
+        );
+    }
+
+    #[test]
+    fn resolves_server_document_root_inside_parens() {
+        let r = resolve(
+            &directive(r#"($_SERVER['DOCUMENT_ROOT'] . "/inc/header.php")"#),
+            &ctx(),
+        );
+        assert_eq!(
+            r,
+            Resolved::Path(PathBuf::from("/project/public/inc/header.php"))
+        );
+    }
+
+    #[test]
+    fn unresolved_other_server_keys() {
+        let r = resolve(&directive("$_SERVER['HTTP_HOST']"), &ctx());
+        assert!(matches!(r, Resolved::Unresolved { .. }));
+    }
+
+    #[test]
+    fn unresolved_other_superglobals() {
+        let r = resolve(&directive("$_GET['DOCUMENT_ROOT']"), &ctx());
+        assert!(matches!(r, Resolved::Unresolved { .. }));
     }
 }
