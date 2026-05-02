@@ -229,6 +229,32 @@ fn cli_format_overrides_config_default_format() {
 }
 
 #[test]
+fn cli_json_overrides_config_dot_default() {
+    // Reverse direction of `cli_format_overrides_config_default_format`:
+    // config:dot → CLI:json. Both directions must respect the
+    // CLI > config > default precedence.
+    let dir = tempfile::tempdir().unwrap();
+    let index = dir.path().join("index.php");
+    fs::write(&index, b"<?php echo 'hi';").unwrap();
+    let config_path = dir.path().join("templategraph.toml");
+    fs::write(&config_path, b"[output]\ndefault_format = \"dot\"\n").unwrap();
+
+    let output = templategraph()
+        .args(["scan", "--config"])
+        .arg(&config_path)
+        .args(["--format", "json"])
+        .arg(&index)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("CLI override should produce JSON");
+    assert_eq!(parsed["schema_version"], 1);
+}
+
+#[test]
 fn scan_with_no_entrypoints_anywhere_reports_clear_error() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("templategraph.toml");

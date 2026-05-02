@@ -1,9 +1,10 @@
 ---
 source: src/output/json.rs
-assertion_line: 350
+assertion_line: 393
 expression: render(&graph)
 ---
 {
+  "schema_version": 1,
   "nodes": [
     {
       "id": "/project/a.php",

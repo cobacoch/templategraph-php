@@ -7,32 +7,46 @@
 //! Domain types in `graph::model` intentionally do not derive `Serialize`;
 //! the renderer constructs serializable DTOs here so the JSON wire shape
 //! can evolve independently of the in-memory graph representation.
+//!
+//! The output schema is documented in `schemas/output-graph-v1.schema.json`
+//! and identified at runtime by the `schema_version` field. Any breaking
+//! change to the wire shape MUST bump `SCHEMA_VERSION` and ship a new
+//! `output-graph-vN.schema.json` alongside the existing one.
 
 use serde::Serialize;
 
 use crate::graph::{Edge, EdgeKind, Graph, Node, NodeKind};
 
+pub const SCHEMA_VERSION: u32 = 1;
+
 pub fn render(graph: &Graph) -> String {
     let dto = JsonGraph {
+        schema_version: SCHEMA_VERSION,
         nodes: graph.nodes.iter().map(JsonNode::from).collect(),
         edges: graph.edges.iter().map(JsonEdge::from).collect(),
     };
     serde_json::to_string_pretty(&dto)
-        .expect("DTO is built from owned, always-serializable values")
+        .expect("DTO contains only infallibly-serializable types")
 }
 
 #[derive(Serialize)]
-struct JsonGraph<'a> {
-    nodes: Vec<JsonNode<'a>>,
-    edges: Vec<JsonEdge<'a>>,
+struct JsonGraph {
+    schema_version: u32,
+    nodes: Vec<JsonNode>,
+    edges: Vec<JsonEdge>,
 }
 
 #[derive(Serialize)]
-struct JsonNode<'a> {
-    id: &'a str,
+struct JsonNode {
+    id: String,
     kind: &'static str,
-    display_name: &'a str,
+    display_name: String,
     is_entrypoint: bool,
+    // Optional path fields are emitted as strings via `to_string_lossy`,
+    // which substitutes U+FFFD for any non-UTF-8 byte sequences. Real-world
+    // PHP filenames are virtually always UTF-8 so this is a non-issue in
+    // practice; consumers needing byte-exact paths should use a different
+    // output mechanism.
     #[serde(skip_serializing_if = "Option::is_none")]
     absolute_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -40,18 +54,18 @@ struct JsonNode<'a> {
 }
 
 #[derive(Serialize)]
-struct JsonEdge<'a> {
-    from: &'a str,
-    to: &'a str,
+struct JsonEdge {
+    from: String,
+    to: String,
     kind: &'static str,
 }
 
-impl<'a> From<&'a Node> for JsonNode<'a> {
-    fn from(node: &'a Node) -> Self {
+impl From<&Node> for JsonNode {
+    fn from(node: &Node) -> Self {
         Self {
-            id: &node.id,
+            id: node.id.clone(),
             kind: node_kind_str(node.kind),
-            display_name: &node.display_name,
+            display_name: node.display_name.clone(),
             is_entrypoint: node.is_entrypoint,
             absolute_path: node
                 .absolute_path
@@ -65,16 +79,19 @@ impl<'a> From<&'a Node> for JsonNode<'a> {
     }
 }
 
-impl<'a> From<&'a Edge> for JsonEdge<'a> {
-    fn from(edge: &'a Edge) -> Self {
+impl From<&Edge> for JsonEdge {
+    fn from(edge: &Edge) -> Self {
         Self {
-            from: &edge.from,
-            to: &edge.to,
+            from: edge.from.clone(),
+            to: edge.to.clone(),
             kind: edge_kind_str(edge.kind),
         }
     }
 }
 
+// Keep these strings in sync with `output::dot::edge_label` /
+// `node_attrs`. Both renderers describe the same kinds; divergence would
+// confuse consumers comparing DOT and JSON output.
 fn node_kind_str(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Entry => "entry",
@@ -116,10 +133,17 @@ mod tests {
     }
 
     #[test]
-    fn empty_graph_renders_empty_arrays() {
+    fn empty_graph_renders_empty_arrays_with_schema_version() {
         let v = parse(&render(&Graph::new()));
+        assert_eq!(v["schema_version"], 1);
         assert_eq!(v["nodes"].as_array().unwrap().len(), 0);
         assert_eq!(v["edges"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn schema_version_constant_matches_output() {
+        let v = parse(&render(&Graph::new()));
+        assert_eq!(v["schema_version"], SCHEMA_VERSION);
     }
 
     #[test]
@@ -219,6 +243,25 @@ mod tests {
         // Pretty-printed JSON should have newlines between top-level keys.
         assert!(out.contains("\n"));
         assert!(out.contains("  \"nodes\""));
+    }
+
+    #[test]
+    fn special_characters_in_display_name_round_trip() {
+        // serde_json handles JSON-string escaping. We assert that quotes,
+        // backslashes, newlines, and tabs survive a round-trip — both that
+        // the renderer produces valid JSON and that consumers reading it
+        // recover the exact source string.
+        let mut g = Graph::new();
+        let tricky = "name with \" and \\ and \n newline and \t tab";
+        g.nodes.push(node(
+            "id",
+            tricky,
+            NodeKind::PhpTemplate,
+            false,
+        ));
+        let out = render(&g);
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        assert_eq!(parsed["nodes"][0]["display_name"], tricky);
     }
 }
 
