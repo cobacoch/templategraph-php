@@ -36,9 +36,17 @@ pub struct ScanArgs {
     #[arg(long)]
     pub config: Option<PathBuf>,
 
-    /// Project root used to resolve relative paths.
+    /// Project root used to display paths relative to a stable base.
     #[arg(long)]
     pub root: Option<PathBuf>,
+
+    /// Web document root used to resolve `$_SERVER['DOCUMENT_ROOT']` in
+    /// include directives. Falls back to `document_root` in
+    /// `templategraph.toml`, then (if a single directory entrypoint is given)
+    /// to that directory. When unset, occurrences of
+    /// `$_SERVER['DOCUMENT_ROOT']` are reported as unresolved.
+    #[arg(long)]
+    pub document_root: Option<PathBuf>,
 
     /// Emit additional progress information to stderr.
     #[arg(short, long)]

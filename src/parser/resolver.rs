@@ -34,12 +34,19 @@ pub enum Resolved {
 
 // Context bundles the per-call inputs that propagate through the recursive
 // `evaluate` walk: the file owning the include directive (used to resolve
-// `__FILE__` / `__DIR__`) and the document root (used to resolve
+// `__FILE__` / `__DIR__`) and an optional document root (used to resolve
 // `$_SERVER['DOCUMENT_ROOT']`, the conventional pattern in PHP static sites
 // for anchoring includes at the public webroot).
+//
+// `document_root` is intentionally optional and distinct from any "project
+// root" concept: in many layouts (`root = "."`, `entrypoints =
+// ["public/..."]`) the document root is a subdirectory of the project, not
+// the project itself. When `document_root` is `None`, occurrences of
+// `$_SERVER['DOCUMENT_ROOT']` are reported as unresolved rather than
+// silently substituted with a misleading path.
 pub struct Context<'a> {
     pub current_file: &'a AbsolutePath,
-    pub document_root: &'a AbsolutePath,
+    pub document_root: Option<&'a AbsolutePath>,
 }
 
 pub fn resolve(directive: &RawIncludeDirective, ctx: &Context<'_>) -> Resolved {
@@ -222,15 +229,15 @@ fn evaluate_function_call(
 }
 
 // Handles the conventional `$_SERVER['DOCUMENT_ROOT']` (or its double-quoted
-// variant). The substitution uses the configured project root because in a
-// PHP static-site layout the document root IS the project's public webroot,
-// and `--root` is the user-facing knob for that. Other `$_SERVER` keys
-// (`HTTP_HOST`, etc.) are reported as unresolved — they have no static value
-// at scan time.
+// variant) by substituting the caller-provided document root. Other
+// `$_SERVER` keys (`HTTP_HOST`, etc.) and other superglobals are reported as
+// unresolved — they have no static value at scan time. If `document_root`
+// is `None`, even `DOCUMENT_ROOT` is unresolved (so a user with a non-trivial
+// project layout doesn't silently get the wrong path).
 fn evaluate_subscript(
     node: Node<'_>,
     source: &[u8],
-    document_root: &AbsolutePath,
+    document_root: Option<&AbsolutePath>,
 ) -> Result<String, String> {
     let array_node = node
         .named_child(0)
@@ -250,10 +257,16 @@ fn evaluate_subscript(
         kind => return Err(format!("unsupported subscript index kind: {}", kind)),
     };
 
-    if key == "DOCUMENT_ROOT" {
-        Ok(document_root.as_path().to_string_lossy().into_owned())
-    } else {
-        Err(format!("unsupported $_SERVER key: {}", key))
+    if key != "DOCUMENT_ROOT" {
+        return Err(format!("unsupported $_SERVER key: {}", key));
+    }
+    match document_root {
+        Some(root) => Ok(root.as_path().to_string_lossy().into_owned()),
+        None => Err(
+            "$_SERVER['DOCUMENT_ROOT'] is not configured \
+             (pass --document-root or set document_root in templategraph.toml)"
+                .to_string(),
+        ),
     }
 }
 
@@ -280,7 +293,7 @@ mod tests {
     fn ctx_for<'a>(file: &'a AbsolutePath, root: &'a AbsolutePath) -> Context<'a> {
         Context {
             current_file: file,
-            document_root: root,
+            document_root: Some(root),
         }
     }
 
@@ -291,7 +304,15 @@ mod tests {
         let root: &'static AbsolutePath = Box::leak(Box::new(document_root()));
         Context {
             current_file: file,
-            document_root: root,
+            document_root: Some(root),
+        }
+    }
+
+    fn ctx_without_document_root() -> Context<'static> {
+        let file: &'static AbsolutePath = Box::leak(Box::new(current_file()));
+        Context {
+            current_file: file,
+            document_root: None,
         }
     }
 
@@ -451,5 +472,20 @@ mod tests {
     fn unresolved_other_superglobals() {
         let r = resolve(&directive("$_GET['DOCUMENT_ROOT']"), &ctx());
         assert!(matches!(r, Resolved::Unresolved { .. }));
+    }
+
+    #[test]
+    fn document_root_unset_leaves_subscript_unresolved() {
+        let r = resolve(
+            &directive(r#"$_SERVER['DOCUMENT_ROOT'] . "/header.php""#),
+            &ctx_without_document_root(),
+        );
+        match r {
+            Resolved::Unresolved { reason, .. } => {
+                assert!(reason.contains("DOCUMENT_ROOT"));
+                assert!(reason.contains("--document-root"));
+            }
+            _ => panic!("expected Unresolved when document_root is None"),
+        }
     }
 }

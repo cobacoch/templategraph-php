@@ -319,3 +319,119 @@ fn scan_directory_with_no_php_files_reports_clear_error() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("no PHP entrypoints"));
 }
+
+#[test]
+fn scan_with_canonical_config_layout_resolves_document_root_explicitly() {
+    // Canonical layout: project repo root holds templategraph.toml, the
+    // actual webroot is `public/`. Without `document_root = "public"`, the
+    // include should be unresolved (safe default).
+    let dir = tempfile::tempdir().unwrap();
+    write_at(
+        dir.path(),
+        "public/index.php",
+        b"<?php include $_SERVER['DOCUMENT_ROOT'] . \"/inc/header.php\";",
+    );
+    write_at(dir.path(), "public/inc/header.php", b"<?php");
+
+    // First run: no document_root configured.
+    let config_no_doc_root = dir.path().join("a.toml");
+    fs::write(
+        &config_no_doc_root,
+        b"root = \".\"\nentrypoints = [\"public/index.php\"]\n",
+    )
+    .unwrap();
+    let output = templategraph()
+        .args(["scan", "--root"])
+        .arg(dir.path())
+        .args(["--config"])
+        .arg(&config_no_doc_root)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("unresolved"),
+        "without document_root, DOCUMENT_ROOT should be unresolved: {}",
+        stdout
+    );
+
+    // Second run: document_root = "public" — include resolves cleanly.
+    let config_with_doc_root = dir.path().join("b.toml");
+    fs::write(
+        &config_with_doc_root,
+        b"root = \".\"\ndocument_root = \"public\"\nentrypoints = [\"public/index.php\"]\n",
+    )
+    .unwrap();
+    let output = templategraph()
+        .args(["scan", "--root"])
+        .arg(dir.path())
+        .args(["--config"])
+        .arg(&config_with_doc_root)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        !stdout.contains("unresolved"),
+        "with document_root, DOCUMENT_ROOT should resolve: {}",
+        stdout
+    );
+}
+
+#[test]
+fn scan_with_multiple_directories_does_not_auto_infer_document_root() {
+    // Two directories given without `--document-root`: ambiguous, so
+    // DOCUMENT_ROOT references must stay unresolved (instead of silently
+    // mis-resolving against the first directory).
+    let dir = tempfile::tempdir().unwrap();
+    write_at(
+        dir.path(),
+        "site_a/index.php",
+        b"<?php include $_SERVER['DOCUMENT_ROOT'] . \"/inc/header.php\";",
+    );
+    write_at(dir.path(), "site_a/inc/header.php", b"<?php");
+    write_at(dir.path(), "site_b/index.php", b"<?php echo 'b';");
+
+    let output = templategraph()
+        .arg("scan")
+        .arg(dir.path().join("site_a"))
+        .arg(dir.path().join("site_b"))
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("unresolved"),
+        "ambiguous multi-directory scan must not auto-infer DOCUMENT_ROOT: {}",
+        stdout
+    );
+}
+
+#[test]
+fn scan_with_explicit_document_root_works_for_multiple_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    write_at(
+        dir.path(),
+        "site_a/index.php",
+        b"<?php include $_SERVER['DOCUMENT_ROOT'] . \"/site_a/inc/header.php\";",
+    );
+    write_at(dir.path(), "site_a/inc/header.php", b"<?php");
+    write_at(dir.path(), "site_b/index.php", b"<?php echo 'b';");
+
+    let output = templategraph()
+        .args(["scan", "--document-root"])
+        .arg(dir.path())
+        .arg(dir.path().join("site_a"))
+        .arg(dir.path().join("site_b"))
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        !stdout.contains("unresolved"),
+        "explicit --document-root should resolve DOCUMENT_ROOT: {}",
+        stdout
+    );
+}

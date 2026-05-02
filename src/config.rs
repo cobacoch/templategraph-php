@@ -15,6 +15,13 @@ pub struct Config {
     #[serde(default)]
     pub root: Option<PathBuf>,
 
+    // Path used to resolve `$_SERVER['DOCUMENT_ROOT']` in include directives.
+    // Conceptually distinct from `root`: in a typical Composer project layout
+    // `root = "."` (repo root) but `document_root = "public"` (web root).
+    // Resolved relative to `root` when not absolute.
+    #[serde(default)]
+    pub document_root: Option<PathBuf>,
+
     #[serde(default)]
     pub entrypoints: Vec<PathBuf>,
 
@@ -138,5 +145,23 @@ unexpected = true
     fn parse_rejects_invalid_format() {
         let result = parse(r#"output = { default_format = "yaml" }"#);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_accepts_document_root() {
+        let config = parse(r#"document_root = "public""#).unwrap();
+        assert_eq!(config.document_root, Some(PathBuf::from("public")));
+    }
+
+    #[test]
+    fn parse_accepts_document_root_alongside_root() {
+        let config = parse(r#"
+root = "."
+document_root = "public"
+entrypoints = ["public/index.php"]
+"#)
+        .unwrap();
+        assert_eq!(config.root, Some(PathBuf::from(".")));
+        assert_eq!(config.document_root, Some(PathBuf::from("public")));
     }
 }
