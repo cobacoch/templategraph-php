@@ -231,7 +231,13 @@ mod snapshots {
         );
         reader.add("/project/public/header.php", "<?php echo 'header';");
 
-        let graph = build_graph(&[entry("/project/public/index.php")], &root(), &reader).unwrap();
+        let graph = build_graph(
+            &[entry("/project/public/index.php")],
+            &root(),
+            None,
+            &reader,
+        )
+        .unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
@@ -252,7 +258,8 @@ require_once __DIR__ . '/d.php';
         reader.add("/project/c.php", "<?php");
         reader.add("/project/d.php", "<?php");
 
-        let graph = build_graph(&[entry("/project/index.php")], &root(), &reader).unwrap();
+        let graph =
+            build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
@@ -261,7 +268,8 @@ require_once __DIR__ . '/d.php';
         let mut reader = InMemoryFileReader::new();
         reader.add("/project/index.php", r#"<?php include $dynamic;"#);
 
-        let graph = build_graph(&[entry("/project/index.php")], &root(), &reader).unwrap();
+        let graph =
+            build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
@@ -273,7 +281,8 @@ require_once __DIR__ . '/d.php';
             r#"<?php include __DIR__ . '/missing.php';"#,
         );
 
-        let graph = build_graph(&[entry("/project/index.php")], &root(), &reader).unwrap();
+        let graph =
+            build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
@@ -289,7 +298,8 @@ require_once __DIR__ . '/d.php';
             r#"<?php include __DIR__ . '/a.php';"#,
         );
 
-        let graph = build_graph(&[entry("/project/a.php")], &root(), &reader).unwrap();
+        let graph =
+            build_graph(&[entry("/project/a.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
@@ -312,6 +322,7 @@ require_once __DIR__ . '/d.php';
                 entry("/project/public/about.php"),
             ],
             &root(),
+            None,
             &reader,
         )
         .unwrap();

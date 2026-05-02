@@ -12,6 +12,7 @@ use crate::scanner::FileReader;
 pub fn build_graph(
     entrypoints: &[AbsolutePath],
     project_root: &AbsolutePath,
+    document_root: Option<&AbsolutePath>,
     file_reader: &dyn FileReader,
 ) -> Result<Graph> {
     let mut graph = Graph::new();
@@ -76,10 +77,60 @@ pub fn build_graph(
         };
 
         for directive in &directives {
-            handle_directive(directive, &file, &id, &mut graph, &mut queue);
+            handle_directive(directive, &file, document_root, &id, &mut graph, &mut queue);
         }
     }
 
+    Ok(graph)
+}
+
+// Builds the graph from a union of explicit and auto-discovered candidates,
+// then post-hoc demotes auto-discovered nodes that have an incoming edge
+// from another candidate (i.e., are included by some other walked file).
+//
+// The single BFS replaces the older two-pass design that read and parsed
+// each candidate twice — once to compute include targets, then again inside
+// `build_graph`. Demotion is restricted to edges between candidates so a
+// "page" that is also reachable via an external (non-candidate) include
+// chain still stays an entrypoint.
+//
+// Files in `explicit_entrypoints` are never demoted regardless of incoming
+// edges — the user named them.
+pub fn build_graph_with_discovery(
+    explicit_entrypoints: &[AbsolutePath],
+    discovered_candidates: &[AbsolutePath],
+    project_root: &AbsolutePath,
+    document_root: Option<&AbsolutePath>,
+    file_reader: &dyn FileReader,
+) -> Result<Graph> {
+    let mut all_seeds: Vec<AbsolutePath> = explicit_entrypoints
+        .iter()
+        .chain(discovered_candidates.iter())
+        .cloned()
+        .collect();
+    all_seeds.sort_by(|a, b| a.as_path().cmp(b.as_path()));
+    all_seeds.dedup();
+
+    let mut graph = build_graph(&all_seeds, project_root, document_root, file_reader)?;
+
+    let candidate_ids: HashSet<NodeId> = all_seeds.iter().map(node_id_for).collect();
+    let explicit_ids: HashSet<NodeId> = explicit_entrypoints.iter().map(node_id_for).collect();
+    let demotable: HashSet<NodeId> = graph
+        .edges
+        .iter()
+        .filter(|e| candidate_ids.contains(&e.from))
+        .map(|e| e.to.clone())
+        .collect();
+
+    for node in &mut graph.nodes {
+        if explicit_ids.contains(&node.id) {
+            continue;
+        }
+        if demotable.contains(&node.id) && node.is_entrypoint {
+            node.is_entrypoint = false;
+            node.kind = NodeKind::PhpTemplate;
+        }
+    }
     Ok(graph)
 }
 
@@ -109,11 +160,16 @@ fn missing_file_node(id: &NodeId, file: &AbsolutePath) -> Node {
 fn handle_directive(
     directive: &RawIncludeDirective,
     current_file: &AbsolutePath,
+    document_root: Option<&AbsolutePath>,
     from_id: &NodeId,
     graph: &mut Graph,
     queue: &mut VecDeque<(AbsolutePath, bool)>,
 ) {
-    match resolver::resolve(directive, current_file) {
+    let ctx = resolver::Context {
+        current_file,
+        document_root,
+    };
+    match resolver::resolve(directive, &ctx) {
         Resolved::Path(path) => {
             let target = absolutize(&path, current_file);
             let target_id = node_id_for(&target);
@@ -208,6 +264,7 @@ mod tests {
         let graph = build_graph(
             &[entry("/project/public/index.php")],
             &root(),
+            None,
             &reader,
         )
         .unwrap();
@@ -241,7 +298,7 @@ mod tests {
         );
         reader.add("/project/c.php", "<?php echo 'c';");
 
-        let graph = build_graph(&[entry("/project/a.php")], &root(), &reader).unwrap();
+        let graph = build_graph(&[entry("/project/a.php")], &root(), None, &reader).unwrap();
 
         assert_eq!(graph.nodes.len(), 3);
         assert_eq!(graph.edges.len(), 2);
@@ -261,7 +318,7 @@ mod tests {
             r#"<?php include __DIR__ . '/a.php';"#,
         );
 
-        let graph = build_graph(&[entry("/project/a.php")], &root(), &reader).unwrap();
+        let graph = build_graph(&[entry("/project/a.php")], &root(), None, &reader).unwrap();
 
         assert_eq!(graph.nodes.len(), 2);
         assert_eq!(graph.edges.len(), 2);
@@ -286,6 +343,7 @@ mod tests {
                 entry("/project/public/about.php"),
             ],
             &root(),
+            None,
             &reader,
         )
         .unwrap();
@@ -300,7 +358,7 @@ mod tests {
         let mut reader = InMemoryFileReader::new();
         reader.add("/project/index.php", r#"<?php include $dynamic;"#);
 
-        let graph = build_graph(&[entry("/project/index.php")], &root(), &reader).unwrap();
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
 
         assert_eq!(graph.nodes.len(), 2);
         let unresolved = graph
@@ -323,7 +381,7 @@ mod tests {
             r#"<?php include $dynamic; include $dynamic;"#,
         );
 
-        let graph = build_graph(&[entry("/project/a.php")], &root(), &reader).unwrap();
+        let graph = build_graph(&[entry("/project/a.php")], &root(), None, &reader).unwrap();
 
         let unresolved_count = graph
             .nodes
@@ -350,7 +408,7 @@ mod tests {
         );
         reader.add("/project/b/c.php", "<?php echo 'c';");
 
-        let graph = build_graph(&[entry("/project/a/x.php")], &root(), &reader).unwrap();
+        let graph = build_graph(&[entry("/project/a/x.php")], &root(), None, &reader).unwrap();
 
         assert_eq!(graph.nodes.len(), 2);
         let target = graph.nodes.iter().find(|n| !n.is_entrypoint).unwrap();
@@ -372,7 +430,7 @@ include __DIR__ . '/../../project/b/c.php';
         );
         reader.add("/project/b/c.php", "<?php echo 'c';");
 
-        let graph = build_graph(&[entry("/project/a/x.php")], &root(), &reader).unwrap();
+        let graph = build_graph(&[entry("/project/a/x.php")], &root(), None, &reader).unwrap();
 
         assert_eq!(graph.nodes.len(), 2);
         assert_eq!(graph.edges.len(), 2);
@@ -394,7 +452,7 @@ include __DIR__ . '/../../project/b/c.php';
             r#"<?php include __DIR__ . '/missing.php';"#,
         );
 
-        let graph = build_graph(&[entry("/project/index.php")], &root(), &reader).unwrap();
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
 
         assert_eq!(graph.nodes.len(), 2);
         let unresolved = graph
@@ -418,7 +476,7 @@ include __DIR__ . '/../../project/b/c.php';
     #[test]
     fn missing_entrypoint_propagates_error() {
         let reader = InMemoryFileReader::new();
-        let result = build_graph(&[entry("/project/missing-entry.php")], &root(), &reader);
+        let result = build_graph(&[entry("/project/missing-entry.php")], &root(), None, &reader);
         assert!(matches!(result, Err(Error::Io(_))));
     }
 
@@ -431,7 +489,7 @@ include __DIR__ . '/../../project/b/c.php';
         );
         reader.add("/external/lib.php", "<?php echo 'lib';");
 
-        let graph = build_graph(&[entry("/project/index.php")], &root(), &reader).unwrap();
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
 
         let external = graph
             .nodes
@@ -445,5 +503,170 @@ include __DIR__ . '/../../project/b/c.php';
             .unwrap();
         assert!(external.root_relative_path.is_none());
         assert_eq!(external.display_name, "/external/lib.php");
+    }
+
+    #[test]
+    fn discovery_demotes_candidate_with_incoming_edge_from_another_candidate() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/index.php",
+            r#"<?php include __DIR__ . '/header.php';"#,
+        );
+        reader.add("/project/header.php", "<?php");
+
+        let graph = build_graph_with_discovery(
+            &[],
+            &[entry("/project/index.php"), entry("/project/header.php")],
+            &root(),
+            None,
+            &reader,
+        )
+        .unwrap();
+
+        let header = graph
+            .nodes
+            .iter()
+            .find(|n| n.display_name == "header.php")
+            .unwrap();
+        assert!(!header.is_entrypoint, "header.php should be demoted");
+        assert_eq!(header.kind, NodeKind::PhpTemplate);
+
+        let index = graph
+            .nodes
+            .iter()
+            .find(|n| n.display_name == "index.php")
+            .unwrap();
+        assert!(index.is_entrypoint);
+        assert_eq!(index.kind, NodeKind::Entry);
+    }
+
+    #[test]
+    fn discovery_keeps_orphan_candidate_as_entrypoint() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add("/project/orphan.php", "<?php");
+
+        let graph = build_graph_with_discovery(
+            &[],
+            &[entry("/project/orphan.php")],
+            &root(),
+            None,
+            &reader,
+        )
+        .unwrap();
+
+        let orphan = &graph.nodes[0];
+        assert!(orphan.is_entrypoint);
+        assert_eq!(orphan.kind, NodeKind::Entry);
+    }
+
+    #[test]
+    fn discovery_keeps_candidate_reached_only_via_non_candidate() {
+        // discovered = [a, c]; a includes b (not a candidate), b includes c.
+        // c gets an incoming edge from b, but b is not a candidate, so c
+        // must remain an entrypoint.
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/a.php",
+            r#"<?php include __DIR__ . '/b.php';"#,
+        );
+        reader.add(
+            "/project/b.php",
+            r#"<?php include __DIR__ . '/c.php';"#,
+        );
+        reader.add("/project/c.php", "<?php");
+
+        let graph = build_graph_with_discovery(
+            &[],
+            &[entry("/project/a.php"), entry("/project/c.php")],
+            &root(),
+            None,
+            &reader,
+        )
+        .unwrap();
+
+        let c = graph
+            .nodes
+            .iter()
+            .find(|n| n.display_name == "c.php")
+            .unwrap();
+        assert!(c.is_entrypoint, "c reached only via non-candidate b stays Entry");
+        let b = graph
+            .nodes
+            .iter()
+            .find(|n| n.display_name == "b.php")
+            .unwrap();
+        assert!(!b.is_entrypoint);
+        assert_eq!(b.kind, NodeKind::PhpTemplate);
+    }
+
+    #[test]
+    fn discovery_never_demotes_explicit_entrypoint() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/page.php",
+            r#"<?php include __DIR__ . '/header.php';"#,
+        );
+        reader.add("/project/header.php", "<?php");
+
+        let graph = build_graph_with_discovery(
+            &[entry("/project/header.php")],
+            &[entry("/project/page.php"), entry("/project/header.php")],
+            &root(),
+            None,
+            &reader,
+        )
+        .unwrap();
+
+        let header = graph
+            .nodes
+            .iter()
+            .find(|n| n.display_name == "header.php")
+            .unwrap();
+        assert!(header.is_entrypoint, "explicit entrypoint must not be demoted");
+    }
+
+    #[test]
+    fn discovery_resolves_server_document_root_when_provided() {
+        let doc_root = AbsolutePath::new(PathBuf::from("/project")).unwrap();
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/page.php",
+            r#"<?php include $_SERVER['DOCUMENT_ROOT'] . "/inc/header.php";"#,
+        );
+        reader.add("/project/inc/header.php", "<?php");
+
+        let graph = build_graph_with_discovery(
+            &[],
+            &[entry("/project/page.php"), entry("/project/inc/header.php")],
+            &root(),
+            Some(&doc_root),
+            &reader,
+        )
+        .unwrap();
+
+        let header = graph
+            .nodes
+            .iter()
+            .find(|n| n.display_name == "inc/header.php")
+            .unwrap();
+        assert!(!header.is_entrypoint, "header included via DOCUMENT_ROOT is demoted");
+    }
+
+    #[test]
+    fn build_graph_without_document_root_leaves_server_subscript_unresolved() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/page.php",
+            r#"<?php include $_SERVER['DOCUMENT_ROOT'] . "/inc/header.php";"#,
+        );
+
+        let graph =
+            build_graph(&[entry("/project/page.php")], &root(), None, &reader).unwrap();
+        let unresolved = graph
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Unresolved)
+            .unwrap();
+        assert!(unresolved.display_name.contains("DOCUMENT_ROOT"));
     }
 }
