@@ -2,6 +2,16 @@
 # Install lefthook (https://lefthook.dev/) and run `lefthook install`
 # in the repository root to activate the hooks below.
 
+pre-commit:
+  commands:
+    rustfmt:
+      # Auto-format staged Rust files with rustfmt and re-stage the result.
+      # Heavier checks (cargo fmt --check, clippy, tests) run in CI rather
+      # than here so commits stay fast.
+      glob: "*.rs"
+      run: rustfmt --edition 2024 {staged_files}
+      stage_fixed: true
+
 commit-msg:
   commands:
     subject-format:
