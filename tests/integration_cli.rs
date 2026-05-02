@@ -423,7 +423,8 @@ fn scan_with_canonical_config_layout_resolves_document_root_explicitly() {
         .arg(&config_no_doc_root)
         .output()
         .unwrap();
-    assert!(output.status.success());
+    // Unresolved DOCUMENT_ROOT → WarningSuccess (2), not failure.
+    assert_eq!(output.status.code(), Some(2));
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
         stdout.contains("unresolved"),
@@ -445,7 +446,7 @@ fn scan_with_canonical_config_layout_resolves_document_root_explicitly() {
         .arg(&config_with_doc_root)
         .output()
         .unwrap();
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
         !stdout.contains("unresolved"),
@@ -475,8 +476,10 @@ fn scan_with_multiple_directories_does_not_auto_infer_document_root() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
+    // Ambiguous DOCUMENT_ROOT → unresolved → WarningSuccess (2).
+    assert_eq!(
+        output.status.code(),
+        Some(2),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -500,9 +503,11 @@ fn scan_warns_about_unresolved_dynamic_argument_includes() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "unresolved deps are warnings, not errors: stderr: {}",
+    // Warning-success → exit code 2 per docs/13-error-handling.md.
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected WarningSuccess (2), stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8(output.stderr).unwrap();
@@ -530,7 +535,7 @@ fn scan_warns_about_missing_include_targets() {
         .output()
         .unwrap();
 
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("warning: 1 unresolved include:"));
     assert!(stderr.contains("file not found"));
@@ -554,7 +559,8 @@ fn scan_emits_no_unresolved_warning_when_graph_is_fully_resolved() {
         .output()
         .unwrap();
 
-    assert!(output.status.success());
+    // Fully resolved graph → clean Success (0).
+    assert_eq!(output.status.code(), Some(0));
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
         !stderr.contains("warning:"),
