@@ -158,17 +158,18 @@ fn evaluate_name(
         "__DIR__" => current_file
             .as_path()
             .parent()
-            .ok_or_else(|| format!("__DIR__ has no parent: {}", current_file.as_path().display()))
+            .ok_or_else(|| {
+                format!(
+                    "__DIR__ has no parent: {}",
+                    current_file.as_path().display()
+                )
+            })
             .map(|p| p.to_string_lossy().into_owned()),
         other => Err(format!("unsupported constant: {}", other)),
     }
 }
 
-fn evaluate_binary(
-    node: Node<'_>,
-    source: &[u8],
-    ctx: &Context<'_>,
-) -> Result<String, String> {
+fn evaluate_binary(node: Node<'_>, source: &[u8], ctx: &Context<'_>) -> Result<String, String> {
     let operator = node
         .child_by_field_name("operator")
         .ok_or_else(|| "binary expression has no operator".to_string())?
@@ -262,11 +263,9 @@ fn evaluate_subscript(
     }
     match document_root {
         Some(root) => Ok(root.as_path().to_string_lossy().into_owned()),
-        None => Err(
-            "$_SERVER['DOCUMENT_ROOT'] is not configured \
+        None => Err("$_SERVER['DOCUMENT_ROOT'] is not configured \
              (pass --document-root or set document_root in templategraph.toml)"
-                .to_string(),
-        ),
+            .to_string()),
     }
 }
 
@@ -337,7 +336,10 @@ mod tests {
     #[test]
     fn resolves_file_constant() {
         let r = resolve(&directive("__FILE__"), &ctx());
-        assert_eq!(r, Resolved::Path(PathBuf::from("/project/public/index.php")));
+        assert_eq!(
+            r,
+            Resolved::Path(PathBuf::from("/project/public/index.php"))
+        );
     }
 
     #[test]

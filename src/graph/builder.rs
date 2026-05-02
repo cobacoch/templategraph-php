@@ -288,14 +288,8 @@ mod tests {
     #[test]
     fn chain_of_includes() {
         let mut reader = InMemoryFileReader::new();
-        reader.add(
-            "/project/a.php",
-            r#"<?php include __DIR__ . '/b.php';"#,
-        );
-        reader.add(
-            "/project/b.php",
-            r#"<?php require __DIR__ . '/c.php';"#,
-        );
+        reader.add("/project/a.php", r#"<?php include __DIR__ . '/b.php';"#);
+        reader.add("/project/b.php", r#"<?php require __DIR__ . '/c.php';"#);
         reader.add("/project/c.php", "<?php echo 'c';");
 
         let graph = build_graph(&[entry("/project/a.php")], &root(), None, &reader).unwrap();
@@ -309,14 +303,8 @@ mod tests {
     #[test]
     fn cycle_does_not_loop() {
         let mut reader = InMemoryFileReader::new();
-        reader.add(
-            "/project/a.php",
-            r#"<?php include __DIR__ . '/b.php';"#,
-        );
-        reader.add(
-            "/project/b.php",
-            r#"<?php include __DIR__ . '/a.php';"#,
-        );
+        reader.add("/project/a.php", r#"<?php include __DIR__ . '/b.php';"#);
+        reader.add("/project/b.php", r#"<?php include __DIR__ . '/a.php';"#);
 
         let graph = build_graph(&[entry("/project/a.php")], &root(), None, &reader).unwrap();
 
@@ -476,7 +464,12 @@ include __DIR__ . '/../../project/b/c.php';
     #[test]
     fn missing_entrypoint_propagates_error() {
         let reader = InMemoryFileReader::new();
-        let result = build_graph(&[entry("/project/missing-entry.php")], &root(), None, &reader);
+        let result = build_graph(
+            &[entry("/project/missing-entry.php")],
+            &root(),
+            None,
+            &reader,
+        );
         assert!(matches!(result, Err(Error::Io(_))));
     }
 
@@ -565,14 +558,8 @@ include __DIR__ . '/../../project/b/c.php';
         // c gets an incoming edge from b, but b is not a candidate, so c
         // must remain an entrypoint.
         let mut reader = InMemoryFileReader::new();
-        reader.add(
-            "/project/a.php",
-            r#"<?php include __DIR__ . '/b.php';"#,
-        );
-        reader.add(
-            "/project/b.php",
-            r#"<?php include __DIR__ . '/c.php';"#,
-        );
+        reader.add("/project/a.php", r#"<?php include __DIR__ . '/b.php';"#);
+        reader.add("/project/b.php", r#"<?php include __DIR__ . '/c.php';"#);
         reader.add("/project/c.php", "<?php");
 
         let graph = build_graph_with_discovery(
@@ -589,7 +576,10 @@ include __DIR__ . '/../../project/b/c.php';
             .iter()
             .find(|n| n.display_name == "c.php")
             .unwrap();
-        assert!(c.is_entrypoint, "c reached only via non-candidate b stays Entry");
+        assert!(
+            c.is_entrypoint,
+            "c reached only via non-candidate b stays Entry"
+        );
         let b = graph
             .nodes
             .iter()
@@ -622,7 +612,10 @@ include __DIR__ . '/../../project/b/c.php';
             .iter()
             .find(|n| n.display_name == "header.php")
             .unwrap();
-        assert!(header.is_entrypoint, "explicit entrypoint must not be demoted");
+        assert!(
+            header.is_entrypoint,
+            "explicit entrypoint must not be demoted"
+        );
     }
 
     #[test]
@@ -649,7 +642,10 @@ include __DIR__ . '/../../project/b/c.php';
             .iter()
             .find(|n| n.display_name == "inc/header.php")
             .unwrap();
-        assert!(!header.is_entrypoint, "header included via DOCUMENT_ROOT is demoted");
+        assert!(
+            !header.is_entrypoint,
+            "header included via DOCUMENT_ROOT is demoted"
+        );
     }
 
     #[test]
@@ -660,8 +656,7 @@ include __DIR__ . '/../../project/b/c.php';
             r#"<?php include $_SERVER['DOCUMENT_ROOT'] . "/inc/header.php";"#,
         );
 
-        let graph =
-            build_graph(&[entry("/project/page.php")], &root(), None, &reader).unwrap();
+        let graph = build_graph(&[entry("/project/page.php")], &root(), None, &reader).unwrap();
         let unresolved = graph
             .nodes
             .iter()

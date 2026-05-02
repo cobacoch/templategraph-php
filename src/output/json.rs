@@ -25,8 +25,7 @@ pub fn render(graph: &Graph) -> String {
         nodes: graph.nodes.iter().map(JsonNode::from).collect(),
         edges: graph.edges.iter().map(JsonEdge::from).collect(),
     };
-    serde_json::to_string_pretty(&dto)
-        .expect("DTO contains only infallibly-serializable types")
+    serde_json::to_string_pretty(&dto).expect("DTO contains only infallibly-serializable types")
 }
 
 #[derive(Serialize)]
@@ -192,9 +191,7 @@ mod tests {
         g.nodes.push(Node {
             id: "id".into(),
             absolute_path: Some(AbsolutePath::new(PathBuf::from("/project/index.php")).unwrap()),
-            root_relative_path: Some(
-                RootRelativePath::new(PathBuf::from("index.php")).unwrap(),
-            ),
+            root_relative_path: Some(RootRelativePath::new(PathBuf::from("index.php")).unwrap()),
             kind: NodeKind::Entry,
             display_name: "index.php".into(),
             is_entrypoint: true,
@@ -253,12 +250,8 @@ mod tests {
         // recover the exact source string.
         let mut g = Graph::new();
         let tricky = "name with \" and \\ and \n newline and \t tab";
-        g.nodes.push(node(
-            "id",
-            tricky,
-            NodeKind::PhpTemplate,
-            false,
-        ));
+        g.nodes
+            .push(node("id", tricky, NodeKind::PhpTemplate, false));
         let out = render(&g);
         let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
         assert_eq!(parsed["nodes"][0]["display_name"], tricky);
@@ -322,8 +315,7 @@ require_once __DIR__ . '/d.php';
         reader.add("/project/c.php", "<?php");
         reader.add("/project/d.php", "<?php");
 
-        let graph =
-            build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
@@ -332,8 +324,7 @@ require_once __DIR__ . '/d.php';
         let mut reader = InMemoryFileReader::new();
         reader.add("/project/index.php", r#"<?php include $dynamic;"#);
 
-        let graph =
-            build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
@@ -345,8 +336,7 @@ require_once __DIR__ . '/d.php';
             r#"<?php include __DIR__ . '/missing.php';"#,
         );
 
-        let graph =
-            build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
@@ -379,17 +369,10 @@ require_once __DIR__ . '/d.php';
     #[test]
     fn snapshot_cycle_does_not_loop() {
         let mut reader = InMemoryFileReader::new();
-        reader.add(
-            "/project/a.php",
-            r#"<?php include __DIR__ . '/b.php';"#,
-        );
-        reader.add(
-            "/project/b.php",
-            r#"<?php include __DIR__ . '/a.php';"#,
-        );
+        reader.add("/project/a.php", r#"<?php include __DIR__ . '/b.php';"#);
+        reader.add("/project/b.php", r#"<?php include __DIR__ . '/a.php';"#);
 
-        let graph =
-            build_graph(&[entry("/project/a.php")], &root(), None, &reader).unwrap();
+        let graph = build_graph(&[entry("/project/a.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 }

@@ -129,18 +129,12 @@ mod tests {
 
     #[test]
     fn normalize_collapses_parent_dir() {
-        assert_eq!(
-            normalize(Path::new("/a/b/../c")),
-            PathBuf::from("/a/c")
-        );
+        assert_eq!(normalize(Path::new("/a/b/../c")), PathBuf::from("/a/c"));
     }
 
     #[test]
     fn normalize_drops_current_dir() {
-        assert_eq!(
-            normalize(Path::new("/a/./b/./c")),
-            PathBuf::from("/a/b/c")
-        );
+        assert_eq!(normalize(Path::new("/a/./b/./c")), PathBuf::from("/a/b/c"));
     }
 
     #[test]
