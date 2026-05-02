@@ -247,6 +247,15 @@ fn evaluate_subscript(
         .named_child(1)
         .ok_or_else(|| "subscript expression has no index".to_string())?;
 
+    // The MVP only resolves bare-variable subscripts (e.g. `$_SERVER[...]`).
+    // Anything more elaborate — `getenv()['x']`, `$arr['a']['b']`,
+    // `$obj->prop['x']` — has a non-`variable_name` array operand and is
+    // reported as unresolved. Checking AST kind before text keeps this
+    // function in line with how the other `evaluate_*` helpers dispatch.
+    let array_kind = array_node.kind();
+    if array_kind != "variable_name" {
+        return Err(format!("unsupported subscript array kind: {}", array_kind));
+    }
     let array_text = array_node.utf8_text(source).map_err(|e| e.to_string())?;
     if array_text != "$_SERVER" {
         return Err(format!("unsupported subscript array: {}", array_text));
@@ -474,6 +483,24 @@ mod tests {
     fn unresolved_other_superglobals() {
         let r = resolve(&directive("$_GET['DOCUMENT_ROOT']"), &ctx());
         assert!(matches!(r, Resolved::Unresolved { .. }));
+    }
+
+    #[test]
+    fn unresolved_subscript_with_non_variable_array_operand() {
+        // `getenv()['DOCUMENT_ROOT']` parses as a subscript whose array
+        // operand is a `function_call_expression`, not a `variable_name`.
+        // The AST-kind check rejects it before any text comparison runs.
+        let r = resolve(&directive("getenv()['DOCUMENT_ROOT']"), &ctx());
+        match r {
+            Resolved::Unresolved { reason, .. } => {
+                assert!(
+                    reason.contains("subscript array kind"),
+                    "expected kind-level rejection, got: {}",
+                    reason
+                );
+            }
+            _ => panic!("expected Unresolved for non-variable subscript operand"),
+        }
     }
 
     #[test]
