@@ -7,6 +7,7 @@ mod parser;
 mod path;
 mod scanner;
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -105,8 +106,14 @@ fn try_run_scan(args: cli::ScanArgs) -> Result<(), String> {
 // regardless of `--verbose`: an unresolved include is a finding the user
 // should see even on a non-verbose run, but it is not fatal so the scan
 // still exits 0.
+//
+// Counting policy: the header reports the total number of unresolved edges
+// (so PHP-level repeats stay visible at a glance), while body lines collapse
+// duplicate `(from, to)` pairs into a single entry suffixed with `(xN)`.
+// Body lines are stably sorted by `from` for cross-run readability; pairs
+// sharing the same `from` keep their first-appearance order.
 fn report_unresolved<W: Write>(graph: &Graph, sink: &mut W) {
-    let lines: Vec<(String, String)> = graph
+    let edges: Vec<(String, String)> = graph
         .edges
         .iter()
         .filter_map(|edge| {
@@ -119,19 +126,37 @@ fn report_unresolved<W: Write>(graph: &Graph, sink: &mut W) {
         })
         .collect();
 
-    if lines.is_empty() {
+    if edges.is_empty() {
         return;
     }
 
-    let suffix = if lines.len() == 1 { "" } else { "s" };
+    let mut order: Vec<(String, String)> = Vec::new();
+    let mut counts: HashMap<(String, String), usize> = HashMap::new();
+    for pair in &edges {
+        match counts.get_mut(pair) {
+            Some(c) => *c += 1,
+            None => {
+                counts.insert(pair.clone(), 1);
+                order.push(pair.clone());
+            }
+        }
+    }
+    order.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let suffix = if edges.len() == 1 { "" } else { "s" };
     let _ = writeln!(
         sink,
         "warning: {} unresolved include{}:",
-        lines.len(),
+        edges.len(),
         suffix
     );
-    for (from, to) in &lines {
-        let _ = writeln!(sink, "  - {} -> {}", from, to);
+    for pair in &order {
+        let count = counts[pair];
+        if count == 1 {
+            let _ = writeln!(sink, "  - {} -> {}", pair.0, pair.1);
+        } else {
+            let _ = writeln!(sink, "  - {} -> {} (x{})", pair.0, pair.1, count);
+        }
     }
 }
 
@@ -412,5 +437,77 @@ include __DIR__ . '/missing.php';
         let out = capture(&graph);
         assert!(out.starts_with("warning: 2 unresolved includes:\n"));
         assert_eq!(out.matches("  - ").count(), 2);
+    }
+
+    #[test]
+    fn report_collapses_duplicate_from_to_pairs_with_x_count_suffix() {
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/index.php",
+            r#"<?php include $dynamic; include $dynamic;"#,
+        );
+
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
+        let out = capture(&graph);
+        // Header reports total edges (PHP-level occurrences), not unique pairs.
+        assert!(
+            out.starts_with("warning: 2 unresolved includes:\n"),
+            "header should count raw edges, got: {}",
+            out
+        );
+        // Body collapses the duplicate pair into a single line with `(x2)`.
+        assert!(
+            out.contains("  - index.php -> unresolved: $dynamic (x2)\n"),
+            "expected collapsed (x2) line, got: {}",
+            out
+        );
+        assert_eq!(out.matches("  - ").count(), 1);
+    }
+
+    #[test]
+    fn report_sorts_body_lines_by_from_path_alphabetically() {
+        // Entrypoint order is b first, a second; BFS preserves that order, so
+        // without sorting the b-line would precede the a-line. The report
+        // must reorder them alphabetically by `from`.
+        let mut reader = InMemoryFileReader::new();
+        reader.add("/project/b.php", r#"<?php include $b;"#);
+        reader.add("/project/a.php", r#"<?php include $a;"#);
+
+        let graph = build_graph(
+            &[entry("/project/b.php"), entry("/project/a.php")],
+            &root(),
+            None,
+            &reader,
+        )
+        .unwrap();
+        let out = capture(&graph);
+        let a_pos = out.find("- a.php ->").expect("a.php line present");
+        let b_pos = out.find("- b.php ->").expect("b.php line present");
+        assert!(
+            a_pos < b_pos,
+            "a.php should be listed before b.php, got: {}",
+            out
+        );
+    }
+
+    #[test]
+    fn report_preserves_first_appearance_order_within_same_from() {
+        // Two different unresolved targets from the same file: the first
+        // emitted edge in the source must appear first, since stable sort by
+        // `from` keeps equal-key entries in original order.
+        let mut reader = InMemoryFileReader::new();
+        reader.add(
+            "/project/index.php",
+            r#"<?php
+include $z;
+include $a;
+"#,
+        );
+
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
+        let out = capture(&graph);
+        let z_pos = out.find("unresolved: $z").expect("$z line present");
+        let a_pos = out.find("unresolved: $a").expect("$a line present");
+        assert!(z_pos < a_pos, "first-appearance order must hold: {}", out);
     }
 }
