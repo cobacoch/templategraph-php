@@ -7,10 +7,13 @@ documented as a JSON Schema at
 [`schemas/output-graph-v1.schema.json`](schemas/output-graph-v1.schema.json).
 The current `schema_version` is `1`.
 
-`templategraph scan` writes any unresolved include findings (dynamic
-arguments and missing files) to stderr as `warning:` lines but still exits
-with status `0`; consumers can pipe stdout straight into a downstream
-processor without filtering.
+`templategraph scan` exit codes:
+
+| Code | Meaning                                                    |
+|------|------------------------------------------------------------|
+| `0`  | Clean success — every include resolved.                    |
+| `1`  | Fatal error — no graph was produced (config / I/O / etc.). |
+| `2`  | Warning-success — graph produced, but at least one include is unresolved. Details are written to stderr as `warning:` lines; stdout still holds the full graph, so consumers can pipe it into downstream tooling regardless. |
 
 **Schema evolution policy.** Schema files are frozen on publish. Every object
 in the schema uses `additionalProperties: false`, so any change to the JSON

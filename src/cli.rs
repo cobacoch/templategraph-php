@@ -1,8 +1,11 @@
+pub mod exit;
+
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
 use crate::output::Format;
+pub use exit::ExitCode;
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
@@ -52,4 +55,3 @@ pub struct ScanArgs {
     #[arg(short, long)]
     pub verbose: bool,
 }
-
