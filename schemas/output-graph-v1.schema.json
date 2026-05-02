@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/cobacoch/templategraph-php/main/schemas/output-graph-v1.schema.json",
+  "title": "templategraph-php output graph (v1)",
+  "description": "Schema for the JSON document produced by `templategraph scan --format json`. Identified at runtime by `schema_version: 1`. This schema is frozen: every object uses `additionalProperties: false`, and any change to the wire shape — breaking or non-breaking — is published as a new `output-graph-vN.schema.json` rather than an in-place edit. Existing schema files (including this one) are never modified after release, so consumers can pin to a specific version with confidence.",
+  "type": "object",
+  "required": ["schema_version", "nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Major version of this output schema. Increments only on breaking changes; a new schema file is published alongside each new major version."
+    },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Edge" }
+    }
+  },
+  "definitions": {
+    "Node": {
+      "type": "object",
+      "required": ["id", "kind", "display_name", "is_entrypoint"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable identifier for the node within this graph. Edges reference nodes by this id."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["entry", "php_template", "unresolved"],
+          "description": "Node category. `entry` = top-level entrypoint chosen by the user or auto-discovered (coincides with `is_entrypoint == true` in stable output). `php_template` = file reached via include from another node. `unresolved` = include target that could not be statically resolved (dynamic argument or missing file)."
+        },
+        "display_name": {
+          "type": "string",
+          "description": "Human-readable label, typically a path relative to the project root for resolved nodes, and a free-text description for unresolved nodes."
+        },
+        "is_entrypoint": {
+          "type": "boolean",
+          "description": "Whether this node was treated as an entrypoint. Distinct from `kind == entry` only in transition states; in stable output, `is_entrypoint` is true iff `kind == entry`."
+        },
+        "absolute_path": {
+          "type": "string",
+          "description": "Absolute filesystem path. Omitted for unresolved nodes (which have no on-disk location)."
+        },
+        "root_relative_path": {
+          "type": "string",
+          "description": "Path relative to the project root passed via `--root` or auto-inferred. Omitted when the node lies outside the root or has no on-disk location."
+        }
+      }
+    },
+    "Edge": {
+      "type": "object",
+      "required": ["from", "to", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string",
+          "description": "id of the source node (the file containing the include directive)."
+        },
+        "to": {
+          "type": "string",
+          "description": "id of the target node (the included file or unresolved placeholder)."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["include", "require", "include_once", "require_once", "unresolved"],
+          "description": "PHP-level include directive that produced this edge. NOTE: an asymmetry exists in v1 — edges to missing-file `unresolved` nodes preserve the original PHP kind (`include` / `require` / etc.), while edges to dynamic-argument `unresolved` nodes use `unresolved`. Consumers needing a uniform 'is this edge resolved?' check should use the target node's `kind` field. The asymmetry is tracked for review and may be normalized in a future schema version."
+        }
+      }
+    }
+  }
+}

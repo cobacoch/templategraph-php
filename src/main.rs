@@ -16,7 +16,7 @@ use clap::Parser;
 
 use crate::config::Config;
 use crate::graph::builder::build_graph_with_discovery;
-use crate::output::{Format, dot};
+use crate::output::{Format, dot, json};
 use crate::path::AbsolutePath;
 use crate::scanner::DirWalker;
 use crate::scanner::filesystem::{FilesystemDirWalker, FilesystemFileReader};
@@ -46,9 +46,6 @@ fn try_run_scan(args: cli::ScanArgs) -> Result<(), String> {
         .format
         .or(config.output.default_format)
         .unwrap_or(Format::Dot);
-    if matches!(format, Format::Json) {
-        return Err("--format json is not yet implemented".into());
-    }
 
     // CLI inputs are absolutized first so they can both inform `project_root`
     // (when no `--root` was given) and feed the entrypoint pipeline.
@@ -94,7 +91,10 @@ fn try_run_scan(args: cli::ScanArgs) -> Result<(), String> {
         );
     }
 
-    let rendered = dot::render(&graph);
+    let rendered = match format {
+        Format::Dot => dot::render(&graph),
+        Format::Json => json::render(&graph),
+    };
     write_output(args.output.as_deref(), &rendered).map_err(|e| e.to_string())
 }
 

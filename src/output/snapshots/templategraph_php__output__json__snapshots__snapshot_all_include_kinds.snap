@@ -1,0 +1,72 @@
+---
+source: src/output/json.rs
+assertion_line: 327
+expression: render(&graph)
+---
+{
+  "schema_version": 1,
+  "nodes": [
+    {
+      "id": "/project/index.php",
+      "kind": "entry",
+      "display_name": "index.php",
+      "is_entrypoint": true,
+      "absolute_path": "/project/index.php",
+      "root_relative_path": "index.php"
+    },
+    {
+      "id": "/project/a.php",
+      "kind": "php_template",
+      "display_name": "a.php",
+      "is_entrypoint": false,
+      "absolute_path": "/project/a.php",
+      "root_relative_path": "a.php"
+    },
+    {
+      "id": "/project/b.php",
+      "kind": "php_template",
+      "display_name": "b.php",
+      "is_entrypoint": false,
+      "absolute_path": "/project/b.php",
+      "root_relative_path": "b.php"
+    },
+    {
+      "id": "/project/c.php",
+      "kind": "php_template",
+      "display_name": "c.php",
+      "is_entrypoint": false,
+      "absolute_path": "/project/c.php",
+      "root_relative_path": "c.php"
+    },
+    {
+      "id": "/project/d.php",
+      "kind": "php_template",
+      "display_name": "d.php",
+      "is_entrypoint": false,
+      "absolute_path": "/project/d.php",
+      "root_relative_path": "d.php"
+    }
+  ],
+  "edges": [
+    {
+      "from": "/project/index.php",
+      "to": "/project/a.php",
+      "kind": "include"
+    },
+    {
+      "from": "/project/index.php",
+      "to": "/project/b.php",
+      "kind": "require"
+    },
+    {
+      "from": "/project/index.php",
+      "to": "/project/c.php",
+      "kind": "include_once"
+    },
+    {
+      "from": "/project/index.php",
+      "to": "/project/d.php",
+      "kind": "require_once"
+    }
+  ]
+}

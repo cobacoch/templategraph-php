@@ -1,0 +1,31 @@
+---
+source: src/output/json.rs
+assertion_line: 350
+expression: render(&graph)
+---
+{
+  "schema_version": 1,
+  "nodes": [
+    {
+      "id": "/project/index.php",
+      "kind": "entry",
+      "display_name": "index.php",
+      "is_entrypoint": true,
+      "absolute_path": "/project/index.php",
+      "root_relative_path": "index.php"
+    },
+    {
+      "id": "unresolved::missing::/project/missing.php",
+      "kind": "unresolved",
+      "display_name": "unresolved: file not found /project/missing.php",
+      "is_entrypoint": false
+    }
+  ],
+  "edges": [
+    {
+      "from": "/project/index.php",
+      "to": "unresolved::missing::/project/missing.php",
+      "kind": "include"
+    }
+  ]
+}

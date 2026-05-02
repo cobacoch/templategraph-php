@@ -1049,6 +1049,7 @@ dependencies = [
  "futures-executor",
  "insta",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "toml",
