@@ -93,9 +93,16 @@ fn push_quoted(out: &mut String, s: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{Edge, Graph, Node, NodeKind};
+    use crate::graph::{Edge, Graph, Node, NodeKind, UnresolvedReason};
 
+    // Helper for resolved nodes (Entry / PhpTemplate). Constructing an
+    // Unresolved node through this path would skip `unresolved_reason`,
+    // so route those tests through `Node::unresolved` instead.
     fn node(id: &str, display: &str, kind: NodeKind, is_entry: bool) -> Node {
+        debug_assert!(
+            !matches!(kind, NodeKind::Unresolved),
+            "use Node::unresolved for unresolved test fixtures"
+        );
         Node {
             id: id.to_string(),
             absolute_path: None,
@@ -136,11 +143,9 @@ mod tests {
     #[test]
     fn unresolved_node_uses_dashed_style() {
         let mut g = Graph::new();
-        g.nodes.push(node(
-            "u",
-            "unresolved: $dynamic",
-            NodeKind::Unresolved,
-            false,
+        g.nodes.push(Node::unresolved(
+            "u".into(),
+            UnresolvedReason::DynamicArgument("$dynamic".into()),
         ));
         let out = render(&g);
         assert!(out.contains(r#""u" [label="unresolved: $dynamic", style=dashed];"#));

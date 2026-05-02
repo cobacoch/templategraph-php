@@ -112,11 +112,18 @@ fn edge_kind_str(kind: EdgeKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{Edge, Graph, Node, NodeKind};
+    use crate::graph::{Edge, Graph, Node, NodeKind, UnresolvedReason};
     use crate::path::{AbsolutePath, RootRelativePath};
     use std::path::PathBuf;
 
+    // Helper for resolved nodes (Entry / PhpTemplate). Constructing an
+    // Unresolved node through this path would skip `unresolved_reason`,
+    // so route those tests through `Node::unresolved` instead.
     fn node(id: &str, display: &str, kind: NodeKind, is_entry: bool) -> Node {
+        debug_assert!(
+            !matches!(kind, NodeKind::Unresolved),
+            "use Node::unresolved for unresolved test fixtures"
+        );
         Node {
             id: id.to_string(),
             absolute_path: None,
@@ -152,8 +159,10 @@ mod tests {
         g.nodes.push(node("e", "index.php", NodeKind::Entry, true));
         g.nodes
             .push(node("t", "header.php", NodeKind::PhpTemplate, false));
-        g.nodes
-            .push(node("u", "unresolved: $x", NodeKind::Unresolved, false));
+        g.nodes.push(Node::unresolved(
+            "u".into(),
+            UnresolvedReason::DynamicArgument("$x".into()),
+        ));
         let v = parse(&render(&g));
         let nodes = v["nodes"].as_array().unwrap();
         assert_eq!(nodes[0]["kind"], "entry");
@@ -210,8 +219,10 @@ mod tests {
     #[test]
     fn node_omits_optional_paths_when_absent() {
         let mut g = Graph::new();
-        g.nodes
-            .push(node("u", "unresolved: $x", NodeKind::Unresolved, false));
+        g.nodes.push(Node::unresolved(
+            "u".into(),
+            UnresolvedReason::DynamicArgument("$x".into()),
+        ));
         let v = parse(&render(&g));
         let n = &v["nodes"][0];
         // Absent fields are omitted (not present in the JSON object).

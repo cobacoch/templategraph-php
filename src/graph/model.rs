@@ -17,7 +17,34 @@ pub struct Node {
     /// (DOT, JSON v1) keep using `display_name`; this field exists so
     /// internal callers and any future schema version can branch on the
     /// reason without re-parsing the human-readable label.
+    ///
+    /// The invariant — `kind == Unresolved` ⟺ `unresolved_reason.is_some()`
+    /// — is upheld by funneling every Unresolved node through
+    /// [`Node::unresolved`] rather than constructing the literal directly.
+    /// Folding the reason into the `NodeKind::Unresolved` variant would
+    /// be type-stronger but costs `NodeKind: Copy`; deferred.
     pub unresolved_reason: Option<UnresolvedReason>,
+}
+
+impl Node {
+    /// Construct an unresolved node from its reason. Routing both the
+    /// dynamic-argument and missing-file paths through here is what
+    /// guarantees `unresolved_reason` is always populated when
+    /// `kind == NodeKind::Unresolved`, and that `display_name` is
+    /// derived from the reason rather than hand-formatted at the call
+    /// site.
+    pub fn unresolved(id: NodeId, reason: UnresolvedReason) -> Self {
+        let display_name = reason.display_name();
+        Self {
+            id,
+            absolute_path: None,
+            root_relative_path: None,
+            kind: NodeKind::Unresolved,
+            display_name,
+            is_entrypoint: false,
+            unresolved_reason: Some(reason),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
