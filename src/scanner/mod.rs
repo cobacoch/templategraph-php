@@ -1,6 +1,8 @@
-#![allow(dead_code)]
-
 pub mod filesystem;
+// `in_memory` is a test-only fixture: every consumer of `InMemoryFileReader`
+// lives under `#[cfg(test)]`. Gating the whole module the same way keeps
+// dead-code lints honest in non-test builds.
+#[cfg(test)]
 pub mod in_memory;
 
 use crate::error::Result;
