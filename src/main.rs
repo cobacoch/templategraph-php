@@ -133,13 +133,13 @@ fn report_unresolved<W: Write>(graph: &Graph, sink: &mut W) {
     let mut order: Vec<(String, String)> = Vec::new();
     let mut counts: HashMap<(String, String), usize> = HashMap::new();
     for pair in &edges {
-        match counts.get_mut(pair) {
-            Some(c) => *c += 1,
-            None => {
-                counts.insert(pair.clone(), 1);
+        counts
+            .entry(pair.clone())
+            .and_modify(|c| *c += 1)
+            .or_insert_with(|| {
                 order.push(pair.clone());
-            }
-        }
+                1
+            });
     }
     order.sort_by(|a, b| a.0.cmp(&b.0));
 
