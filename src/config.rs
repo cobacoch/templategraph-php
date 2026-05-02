@@ -133,11 +133,13 @@ default_format = "dot"
 
     #[test]
     fn parse_rejects_unknown_output_field() {
-        let result = parse(r#"
+        let result = parse(
+            r#"
 [output]
 default_format = "dot"
 unexpected = true
-"#);
+"#,
+        );
         assert!(result.is_err());
     }
 
@@ -155,11 +157,13 @@ unexpected = true
 
     #[test]
     fn parse_accepts_document_root_alongside_root() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
 root = "."
 document_root = "public"
 entrypoints = ["public/index.php"]
-"#)
+"#,
+        )
         .unwrap();
         assert_eq!(config.root, Some(PathBuf::from(".")));
         assert_eq!(config.document_root, Some(PathBuf::from("public")));

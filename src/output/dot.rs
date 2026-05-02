@@ -258,8 +258,7 @@ require_once __DIR__ . '/d.php';
         reader.add("/project/c.php", "<?php");
         reader.add("/project/d.php", "<?php");
 
-        let graph =
-            build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
@@ -268,8 +267,7 @@ require_once __DIR__ . '/d.php';
         let mut reader = InMemoryFileReader::new();
         reader.add("/project/index.php", r#"<?php include $dynamic;"#);
 
-        let graph =
-            build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
@@ -281,25 +279,17 @@ require_once __DIR__ . '/d.php';
             r#"<?php include __DIR__ . '/missing.php';"#,
         );
 
-        let graph =
-            build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
     #[test]
     fn snapshot_cycle_does_not_loop() {
         let mut reader = InMemoryFileReader::new();
-        reader.add(
-            "/project/a.php",
-            r#"<?php include __DIR__ . '/b.php';"#,
-        );
-        reader.add(
-            "/project/b.php",
-            r#"<?php include __DIR__ . '/a.php';"#,
-        );
+        reader.add("/project/a.php", r#"<?php include __DIR__ . '/b.php';"#);
+        reader.add("/project/b.php", r#"<?php include __DIR__ . '/a.php';"#);
 
-        let graph =
-            build_graph(&[entry("/project/a.php")], &root(), None, &reader).unwrap();
+        let graph = build_graph(&[entry("/project/a.php")], &root(), None, &reader).unwrap();
         insta::assert_snapshot!(render(&graph));
     }
 
