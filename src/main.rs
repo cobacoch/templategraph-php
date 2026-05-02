@@ -23,12 +23,11 @@ use crate::path::AbsolutePath;
 use crate::scanner::DirWalker;
 use crate::scanner::filesystem::{FilesystemDirWalker, FilesystemFileReader};
 
-fn main() -> std::process::ExitCode {
+fn main() -> ExitCode {
     let args = cli::Cli::parse();
-    let code = match args.command {
+    match args.command {
         cli::Command::Scan(scan_args) => run_scan(scan_args),
-    };
-    code.into()
+    }
 }
 
 fn run_scan(args: cli::ScanArgs) -> ExitCode {
@@ -95,8 +94,8 @@ fn try_run_scan(args: cli::ScanArgs) -> Result<ExitCode, String> {
     };
     write_output(args.output.as_deref(), &rendered).map_err(|e| e.to_string())?;
 
-    let had_unresolved = report_unresolved(&graph, &mut io::stderr());
-    Ok(if had_unresolved {
+    let unresolved_count = report_unresolved(&graph, &mut io::stderr());
+    Ok(if unresolved_count > 0 {
         ExitCode::WarningSuccess
     } else {
         ExitCode::Success
@@ -104,13 +103,13 @@ fn try_run_scan(args: cli::ScanArgs) -> Result<ExitCode, String> {
 }
 
 // Emits a one-line summary plus per-edge details for every edge whose target
-// is an `Unresolved` node, and returns whether any were found. The check is
-// on target node kind (not edge kind) because edges to missing-file
+// is an `Unresolved` node, and returns the total number of such edges. The
+// check is on target node kind (not edge kind) because edges to missing-file
 // unresolved targets keep their original PHP include kind (`include` /
 // `require` / etc.) on the wire. Always on regardless of `--verbose`: an
 // unresolved include is a finding the user should see even on a non-verbose
-// run. The boolean return is what `try_run_scan` uses to map to
-// `ExitCode::WarningSuccess` (2); a zero-warning scan returns
+// run. The returned count is what `try_run_scan` uses to map to
+// `ExitCode::WarningSuccess` (2) when non-zero; a zero-warning scan returns
 // `ExitCode::Success` (0).
 //
 // Counting policy: the header reports the total number of unresolved edges
@@ -118,7 +117,7 @@ fn try_run_scan(args: cli::ScanArgs) -> Result<ExitCode, String> {
 // duplicate `(from, to)` pairs into a single entry suffixed with `(xN)`.
 // Body lines are stably sorted by `from` for cross-run readability; pairs
 // sharing the same `from` keep their first-appearance order.
-fn report_unresolved<W: Write>(graph: &Graph, sink: &mut W) -> bool {
+fn report_unresolved<W: Write>(graph: &Graph, sink: &mut W) -> usize {
     let edges: Vec<(String, String)> = graph
         .edges
         .iter()
@@ -133,7 +132,7 @@ fn report_unresolved<W: Write>(graph: &Graph, sink: &mut W) -> bool {
         .collect();
 
     if edges.is_empty() {
-        return false;
+        return 0;
     }
 
     let mut order: Vec<(String, String)> = Vec::new();
@@ -164,7 +163,7 @@ fn report_unresolved<W: Write>(graph: &Graph, sink: &mut W) -> bool {
             let _ = writeln!(sink, "  - {} -> {} (x{})", pair.0, pair.1, count);
         }
     }
-    true
+    edges.len()
 }
 
 fn load_config(config_path: Option<&Path>, verbose: bool) -> Result<Config, String> {
@@ -385,10 +384,10 @@ mod tests {
         AbsolutePath::new(PathBuf::from(path)).unwrap()
     }
 
-    fn capture(graph: &Graph) -> (String, bool) {
+    fn capture(graph: &Graph) -> (String, usize) {
         let mut buf: Vec<u8> = Vec::new();
-        let had = report_unresolved(graph, &mut buf);
-        (String::from_utf8(buf).unwrap(), had)
+        let count = report_unresolved(graph, &mut buf);
+        (String::from_utf8(buf).unwrap(), count)
     }
 
     #[test]
@@ -401,9 +400,9 @@ mod tests {
         reader.add("/project/header.php", "<?php");
 
         let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
-        let (out, had) = capture(&graph);
+        let (out, count) = capture(&graph);
         assert_eq!(out, "");
-        assert!(!had, "no unresolved targets must report had=false");
+        assert_eq!(count, 0);
     }
 
     #[test]
@@ -412,8 +411,8 @@ mod tests {
         reader.add("/project/index.php", r#"<?php include $dynamic;"#);
 
         let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
-        let (out, had) = capture(&graph);
-        assert!(had);
+        let (out, count) = capture(&graph);
+        assert_eq!(count, 1);
         assert!(out.starts_with("warning: 1 unresolved include:\n"));
         assert!(out.contains("  - index.php -> unresolved: $dynamic\n"));
     }
@@ -427,8 +426,8 @@ mod tests {
         );
 
         let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
-        let (out, had) = capture(&graph);
-        assert!(had);
+        let (out, count) = capture(&graph);
+        assert_eq!(count, 1);
         assert!(out.starts_with("warning: 1 unresolved include:\n"));
         assert!(out.contains("  - index.php -> unresolved: file not found /project/missing.php\n"));
     }
@@ -445,7 +444,8 @@ include __DIR__ . '/missing.php';
         );
 
         let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
-        let (out, _had) = capture(&graph);
+        let (out, count) = capture(&graph);
+        assert_eq!(count, 2);
         assert!(out.starts_with("warning: 2 unresolved includes:\n"));
         assert_eq!(out.matches("  - ").count(), 2);
     }
@@ -459,7 +459,9 @@ include __DIR__ . '/missing.php';
         );
 
         let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
-        let (out, _had) = capture(&graph);
+        let (out, count) = capture(&graph);
+        // Returned count covers raw edges, matching the header.
+        assert_eq!(count, 2);
         // Header reports total edges (PHP-level occurrences), not unique pairs.
         assert!(
             out.starts_with("warning: 2 unresolved includes:\n"),
@@ -491,7 +493,7 @@ include __DIR__ . '/missing.php';
             &reader,
         )
         .unwrap();
-        let (out, _had) = capture(&graph);
+        let (out, _count) = capture(&graph);
         let a_pos = out.find("- a.php ->").expect("a.php line present");
         let b_pos = out.find("- b.php ->").expect("b.php line present");
         assert!(
@@ -516,7 +518,7 @@ include $a;
         );
 
         let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
-        let (out, _had) = capture(&graph);
+        let (out, _count) = capture(&graph);
         let z_pos = out.find("unresolved: $z").expect("$z line present");
         let a_pos = out.find("unresolved: $a").expect("$a line present");
         assert!(z_pos < a_pos, "first-appearance order must hold: {}", out);

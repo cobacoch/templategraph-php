@@ -2,9 +2,9 @@
 //!
 //! Values are pinned per `docs/13-error-handling.md`:
 //! `0` clean success, `1` fatal error, `2` warning-success (graph produced
-//! but contained unresolved includes). The `u8` repr is what `process::ExitCode`
-//! ultimately emits, and the `From` impl below is the only sanctioned way
-//! main converts these into the value `std` returns to the OS.
+//! but contained unresolved includes). The `u8` repr is what
+//! `process::ExitCode` ultimately emits, and the `Termination` impl below
+//! is the only sanctioned way `main` returns these to the OS.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -14,15 +14,16 @@ pub enum ExitCode {
     WarningSuccess = 2,
 }
 
-impl From<ExitCode> for std::process::ExitCode {
-    fn from(code: ExitCode) -> Self {
-        Self::from(code as u8)
+impl std::process::Termination for ExitCode {
+    fn report(self) -> std::process::ExitCode {
+        std::process::ExitCode::from(self as u8)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Termination;
 
     #[test]
     fn exit_code_values_are_stable() {
@@ -33,11 +34,13 @@ mod tests {
     }
 
     #[test]
-    fn from_impl_round_trips_through_std_exit_code() {
-        // Rough sanity check on the From bridge: each variant maps to a
-        // distinct `std::process::ExitCode` instance.
-        let _: std::process::ExitCode = ExitCode::Success.into();
-        let _: std::process::ExitCode = ExitCode::Fatal.into();
-        let _: std::process::ExitCode = ExitCode::WarningSuccess.into();
+    fn termination_impl_is_defined_for_each_variant() {
+        // `std::process::ExitCode` is opaque, so we cannot assert the
+        // numeric value coming out the other side; this test only proves
+        // the conversion is wired up for every variant. The wire contract
+        // itself is locked in by `exit_code_values_are_stable`.
+        let _ = ExitCode::Success.report();
+        let _ = ExitCode::Fatal.report();
+        let _ = ExitCode::WarningSuccess.report();
     }
 }

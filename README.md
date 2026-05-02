@@ -9,11 +9,15 @@ The current `schema_version` is `1`.
 
 `templategraph scan` exit codes:
 
-| Code | Meaning                                                    |
-|------|------------------------------------------------------------|
-| `0`  | Clean success — every include resolved.                    |
-| `1`  | Fatal error — no graph was produced (config / I/O / etc.). |
-| `2`  | Warning-success — graph produced, but at least one include is unresolved. Details are written to stderr as `warning:` lines; stdout still holds the full graph, so consumers can pipe it into downstream tooling regardless. |
+| Code | Meaning                                                                  |
+|------|--------------------------------------------------------------------------|
+| `0`  | Clean success — every include resolved.                                  |
+| `1`  | Fatal error — no graph was produced (config / I/O / etc.).               |
+| `2`  | Warning-success — graph produced, but at least one include is unresolved.|
+
+When the exit code is `2`, the unresolved findings are written to stderr as
+`warning:` lines; stdout still holds the full graph, so consumers can pipe
+it into downstream tooling regardless of code.
 
 **Schema evolution policy.** Schema files are frozen on publish. Every object
 in the schema uses `additionalProperties: false`, so any change to the JSON

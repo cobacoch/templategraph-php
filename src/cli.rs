@@ -1,4 +1,4 @@
-pub mod exit;
+mod exit;
 
 use std::path::PathBuf;
 
