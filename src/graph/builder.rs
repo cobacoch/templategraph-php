@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
-use crate::graph::model::{Edge, EdgeKind, Graph, Node, NodeId, NodeKind};
+use crate::graph::model::{Edge, EdgeKind, Graph, Node, NodeId, NodeKind, UnresolvedReason};
 use crate::parser::php::{self, RawIncludeDirective};
 use crate::parser::resolver::{self, Resolved};
 use crate::path::{self, AbsolutePath, RootRelativePath};
@@ -64,8 +64,9 @@ pub fn build_graph(
             absolute_path: Some(file.clone()),
             root_relative_path: relative_to(&file, project_root),
             kind,
-            display_name: display_name(&file, project_root),
+            display_name: resolved_display_name(&file, project_root),
             is_entrypoint,
+            unresolved_reason: None,
         });
 
         let directives = match php::extract_include_directives(&source) {
@@ -147,14 +148,10 @@ fn missing_file_id(file: &AbsolutePath) -> NodeId {
 }
 
 fn missing_file_node(id: &NodeId, file: &AbsolutePath) -> Node {
-    Node {
-        id: id.clone(),
-        absolute_path: None,
-        root_relative_path: None,
-        kind: NodeKind::Unresolved,
-        display_name: format!("unresolved: file not found {}", file.as_path().display()),
-        is_entrypoint: false,
-    }
+    Node::unresolved(
+        id.clone(),
+        UnresolvedReason::FileNotFound(file.as_path().to_path_buf()),
+    )
 }
 
 fn handle_directive(
@@ -185,14 +182,10 @@ fn handle_directive(
         } => {
             let target_id = unresolved_id(&argument_source);
             if graph.find_node(&target_id).is_none() {
-                graph.nodes.push(Node {
-                    id: target_id.clone(),
-                    absolute_path: None,
-                    root_relative_path: None,
-                    kind: NodeKind::Unresolved,
-                    display_name: format!("unresolved: {}", argument_source),
-                    is_entrypoint: false,
-                });
+                graph.nodes.push(Node::unresolved(
+                    target_id.clone(),
+                    UnresolvedReason::DynamicArgument(argument_source.clone()),
+                ));
             }
             graph.edges.push(Edge {
                 from: from_id.clone(),
@@ -218,7 +211,10 @@ fn relative_to(file: &AbsolutePath, root: &AbsolutePath) -> Option<RootRelativeP
         .and_then(|p| RootRelativePath::new(p.to_path_buf()).ok())
 }
 
-fn display_name(file: &AbsolutePath, root: &AbsolutePath) -> String {
+// Distinct from `UnresolvedReason::display_name`: this builds the label
+// for resolved nodes (entries / templates) by stripping the project root
+// prefix; the unresolved counterpart formats a free-text reason.
+fn resolved_display_name(file: &AbsolutePath, root: &AbsolutePath) -> String {
     file.as_path()
         .strip_prefix(root.as_path())
         .map(|p| p.display().to_string())
@@ -356,6 +352,13 @@ mod tests {
             .unwrap();
         assert!(unresolved.absolute_path.is_none());
         assert!(unresolved.root_relative_path.is_none());
+        // Reason carries the original argument source; display_name stays
+        // in sync via UnresolvedReason::display_name().
+        match unresolved.unresolved_reason.as_ref() {
+            Some(UnresolvedReason::DynamicArgument(arg)) => assert_eq!(arg, "$dynamic"),
+            other => panic!("expected DynamicArgument, got: {:?}", other),
+        }
+        assert_eq!(unresolved.display_name, "unresolved: $dynamic");
 
         assert_eq!(graph.edges.len(), 1);
         assert_eq!(graph.edges[0].kind, EdgeKind::Unresolved);
@@ -452,6 +455,14 @@ include __DIR__ . '/../../project/b/c.php';
         assert!(unresolved.display_name.contains("file not found"));
         assert!(unresolved.display_name.contains("/project/missing.php"));
         assert_eq!(unresolved.id, "unresolved::missing::/project/missing.php");
+        // Reason carries the absolute path that was looked up; the
+        // free-text label is derived from it.
+        match unresolved.unresolved_reason.as_ref() {
+            Some(UnresolvedReason::FileNotFound(path)) => {
+                assert_eq!(path, &PathBuf::from("/project/missing.php"));
+            }
+            other => panic!("expected FileNotFound, got: {:?}", other),
+        }
 
         assert_eq!(graph.edges.len(), 1);
         // Edge kind preserves the original PHP include kind even though the
