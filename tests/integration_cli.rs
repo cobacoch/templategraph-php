@@ -114,7 +114,11 @@ fn scan_with_format_json_emits_parseable_json() {
     let edges = parsed["edges"].as_array().unwrap();
     assert_eq!(nodes.len(), 2);
     assert_eq!(edges.len(), 1);
-    assert!(nodes.iter().any(|n| n["display_name"] == "index.php" && n["kind"] == "entry"));
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n["display_name"] == "index.php" && n["kind"] == "entry")
+    );
     assert!(
         nodes
             .iter()
@@ -351,7 +355,11 @@ fn scan_resolves_server_document_root_against_inferred_root() {
 fn scan_directory_skips_excluded_dirs_via_config() {
     let dir = tempfile::tempdir().unwrap();
     write_at(dir.path(), "index.php", b"<?php echo 'top';");
-    write_at(dir.path(), "vendor/lib.php", b"<?php echo 'should be excluded';");
+    write_at(
+        dir.path(),
+        "vendor/lib.php",
+        b"<?php echo 'should be excluded';",
+    );
     let config_path = dir.path().join("templategraph.toml");
     fs::write(&config_path, b"exclude = [\"vendor\"]\n").unwrap();
 
@@ -467,12 +475,91 @@ fn scan_with_multiple_directories_does_not_auto_infer_document_root() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
         stdout.contains("unresolved"),
         "ambiguous multi-directory scan must not auto-infer DOCUMENT_ROOT: {}",
         stdout
+    );
+}
+
+#[test]
+fn scan_warns_about_unresolved_dynamic_argument_includes() {
+    let dir = tempfile::tempdir().unwrap();
+    write_at(dir.path(), "index.php", b"<?php include $dynamic;");
+
+    let output = templategraph()
+        .args(["scan", "--root"])
+        .arg(dir.path())
+        .arg(dir.path().join("index.php"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "unresolved deps are warnings, not errors: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("warning: 1 unresolved include:"),
+        "expected warning header, got: {}",
+        stderr
+    );
+    assert!(stderr.contains("index.php -> unresolved: $dynamic"));
+}
+
+#[test]
+fn scan_warns_about_missing_include_targets() {
+    let dir = tempfile::tempdir().unwrap();
+    write_at(
+        dir.path(),
+        "index.php",
+        b"<?php include __DIR__ . '/missing.php';",
+    );
+
+    let output = templategraph()
+        .args(["scan", "--root"])
+        .arg(dir.path())
+        .arg(dir.path().join("index.php"))
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("warning: 1 unresolved include:"));
+    assert!(stderr.contains("file not found"));
+    assert!(stderr.contains("missing.php"));
+}
+
+#[test]
+fn scan_emits_no_unresolved_warning_when_graph_is_fully_resolved() {
+    let dir = tempfile::tempdir().unwrap();
+    write_at(
+        dir.path(),
+        "index.php",
+        b"<?php include __DIR__ . '/header.php';",
+    );
+    write_at(dir.path(), "header.php", b"<?php");
+
+    let output = templategraph()
+        .args(["scan", "--root"])
+        .arg(dir.path())
+        .arg(dir.path().join("index.php"))
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        !stderr.contains("warning:"),
+        "fully resolved graph must not emit warnings: {}",
+        stderr
     );
 }
 
@@ -495,7 +582,11 @@ fn scan_with_explicit_document_root_works_for_multiple_directories() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
         !stdout.contains("unresolved"),
