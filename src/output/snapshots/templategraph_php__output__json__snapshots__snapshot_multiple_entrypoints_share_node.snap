@@ -1,0 +1,45 @@
+---
+source: src/output/json.rs
+assertion_line: 333
+expression: render(&graph)
+---
+{
+  "nodes": [
+    {
+      "id": "/project/public/index.php",
+      "kind": "entry",
+      "display_name": "public/index.php",
+      "is_entrypoint": true,
+      "absolute_path": "/project/public/index.php",
+      "root_relative_path": "public/index.php"
+    },
+    {
+      "id": "/project/public/about.php",
+      "kind": "entry",
+      "display_name": "public/about.php",
+      "is_entrypoint": true,
+      "absolute_path": "/project/public/about.php",
+      "root_relative_path": "public/about.php"
+    },
+    {
+      "id": "/project/public/header.php",
+      "kind": "php_template",
+      "display_name": "public/header.php",
+      "is_entrypoint": false,
+      "absolute_path": "/project/public/header.php",
+      "root_relative_path": "public/header.php"
+    }
+  ],
+  "edges": [
+    {
+      "from": "/project/public/index.php",
+      "to": "/project/public/header.php",
+      "kind": "include"
+    },
+    {
+      "from": "/project/public/about.php",
+      "to": "/project/public/header.php",
+      "kind": "include"
+    }
+  ]
+}

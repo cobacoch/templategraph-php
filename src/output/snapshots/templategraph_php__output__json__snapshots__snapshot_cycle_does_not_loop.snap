@@ -1,0 +1,37 @@
+---
+source: src/output/json.rs
+assertion_line: 350
+expression: render(&graph)
+---
+{
+  "nodes": [
+    {
+      "id": "/project/a.php",
+      "kind": "entry",
+      "display_name": "a.php",
+      "is_entrypoint": true,
+      "absolute_path": "/project/a.php",
+      "root_relative_path": "a.php"
+    },
+    {
+      "id": "/project/b.php",
+      "kind": "php_template",
+      "display_name": "b.php",
+      "is_entrypoint": false,
+      "absolute_path": "/project/b.php",
+      "root_relative_path": "b.php"
+    }
+  ],
+  "edges": [
+    {
+      "from": "/project/a.php",
+      "to": "/project/b.php",
+      "kind": "include"
+    },
+    {
+      "from": "/project/b.php",
+      "to": "/project/a.php",
+      "kind": "include"
+    }
+  ]
+}

@@ -89,20 +89,38 @@ fn scan_with_output_flag_writes_to_file() {
 }
 
 #[test]
-fn scan_with_format_json_reports_not_implemented() {
+fn scan_with_format_json_emits_parseable_json() {
     let dir = tempfile::tempdir().unwrap();
     let index = dir.path().join("index.php");
-    fs::write(&index, b"<?php echo 'hi';").unwrap();
+    fs::write(&index, b"<?php include __DIR__ . '/header.php';").unwrap();
+    fs::write(dir.path().join("header.php"), b"<?php").unwrap();
 
     let output = templategraph()
-        .args(["scan", "--format", "json"])
+        .args(["scan", "--format", "json", "--root"])
+        .arg(dir.path())
         .arg(&index)
         .output()
         .unwrap();
 
-    assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("--format json is not yet implemented"));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("CLI must emit valid JSON");
+    let nodes = parsed["nodes"].as_array().unwrap();
+    let edges = parsed["edges"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2);
+    assert_eq!(edges.len(), 1);
+    assert!(nodes.iter().any(|n| n["display_name"] == "index.php" && n["kind"] == "entry"));
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n["display_name"] == "header.php" && n["kind"] == "php_template")
+    );
+    assert_eq!(edges[0]["kind"], "include");
 }
 
 #[test]
@@ -162,17 +180,13 @@ fn scan_uses_entrypoints_from_config_when_cli_omits_them() {
 
 #[test]
 fn scan_uses_default_format_from_config() {
-    // When the config requests json (currently unimplemented), the CLI should
-    // still honor that selection rather than silently falling back to dot.
+    // When the config requests json, the CLI honors it rather than silently
+    // falling back to dot.
     let dir = tempfile::tempdir().unwrap();
     let index = dir.path().join("index.php");
     fs::write(&index, b"<?php echo 'hi';").unwrap();
     let config_path = dir.path().join("templategraph.toml");
-    fs::write(
-        &config_path,
-        b"[output]\ndefault_format = \"json\"\n",
-    )
-    .unwrap();
+    fs::write(&config_path, b"[output]\ndefault_format = \"json\"\n").unwrap();
 
     let output = templategraph()
         .args(["scan", "--config"])
@@ -181,9 +195,37 @@ fn scan_uses_default_format_from_config() {
         .output()
         .unwrap();
 
-    assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("--format json is not yet implemented"));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("config-selected JSON output must be valid JSON");
+    assert!(parsed["nodes"].is_array());
+}
+
+#[test]
+fn cli_format_overrides_config_default_format() {
+    // CLI `--format dot` must beat config `default_format = "json"`.
+    let dir = tempfile::tempdir().unwrap();
+    let index = dir.path().join("index.php");
+    fs::write(&index, b"<?php echo 'hi';").unwrap();
+    let config_path = dir.path().join("templategraph.toml");
+    fs::write(&config_path, b"[output]\ndefault_format = \"json\"\n").unwrap();
+
+    let output = templategraph()
+        .args(["scan", "--config"])
+        .arg(&config_path)
+        .args(["--format", "dot"])
+        .arg(&index)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.starts_with("digraph templategraph {"));
 }
 
 #[test]

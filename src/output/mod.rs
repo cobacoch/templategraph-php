@@ -1,4 +1,5 @@
 pub mod dot;
+pub mod json;
 
 use clap::ValueEnum;
 use serde::Deserialize;
