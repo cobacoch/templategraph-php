@@ -124,6 +124,7 @@ mod tests {
             kind,
             display_name: display.to_string(),
             is_entrypoint: is_entry,
+            unresolved_reason: None,
         }
     }
 
@@ -195,6 +196,7 @@ mod tests {
             kind: NodeKind::Entry,
             display_name: "index.php".into(),
             is_entrypoint: true,
+            unresolved_reason: None,
         });
         let v = parse(&render(&g));
         let n = &v["nodes"][0];

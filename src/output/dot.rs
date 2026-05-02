@@ -103,6 +103,7 @@ mod tests {
             kind,
             display_name: display.to_string(),
             is_entrypoint: is_entry,
+            unresolved_reason: None,
         }
     }
 
