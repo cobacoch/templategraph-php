@@ -1,14 +1,15 @@
 # License allowlist for THIRD-PARTY-LICENSES generation.
-# Order matters: cargo-about picks the first match for "X OR Y" expressions.
+# Order matters: cargo-about picks the first match for "X OR Y" expressions,
+# so MIT is listed before Apache-2.0 to resolve dual-licensed crates to MIT
+# in the generated THIRD-PARTY-LICENSES.
+#
+# YAGNI: only accept licenses that the current dependency graph actually
+# requires. Add new entries individually when a real dependency demands one.
+# Kept in sync with `deny.toml` so license policy is managed in one place.
 accepted = [
     "MIT",
     "Apache-2.0",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "ISC",
-    "Zlib",
-    "Unlicense",
-    "MIT-0",
+    "Unicode-3.0",
 ]
 
 # Only runtime dependencies need attribution in distributed binaries.
