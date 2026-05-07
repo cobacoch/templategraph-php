@@ -1,5 +1,7 @@
 # License allowlist for THIRD-PARTY-LICENSES generation.
-# Order matters: cargo-about picks the first match for "X OR Y" expressions.
+# Order matters: cargo-about picks the first match for "X OR Y" expressions,
+# so MIT is listed before Apache-2.0 to resolve dual-licensed crates to MIT
+# in the generated THIRD-PARTY-LICENSES.
 #
 # YAGNI: only accept licenses that the current dependency graph actually
 # requires. Add new entries individually when a real dependency demands one.
