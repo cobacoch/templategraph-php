@@ -15,6 +15,17 @@ pub enum IncludeKind {
 pub struct RawIncludeDirective {
     pub kind: IncludeKind,
     pub argument_source: String,
+    /// True when the enclosing PHP source's tree contains any `ERROR` or
+    /// `MISSING` node — set per-file rather than per-directive because
+    /// tree-sitter's recovery often closes an `include_expression`'s subtree
+    /// before the broken construct (e.g. a dangling `.` operator), so a
+    /// directive whose own subtree looks clean can still sit in a file whose
+    /// global parse failed. Tree-sitter is error-tolerant and still returns
+    /// a tree in these cases, so callers cannot detect the failure via
+    /// `extract_include_directives` returning `Err`; the resolver must
+    /// branch on this flag to surface the directive as unresolved instead
+    /// of silently evaluating an argument from a syntactically broken file.
+    pub file_has_parse_error: bool,
 }
 
 #[derive(Debug, Error)]
@@ -30,23 +41,36 @@ pub fn extract_include_directives(source: &str) -> Result<Vec<RawIncludeDirectiv
     let mut parser = Parser::new();
     parser.set_language(&tree_sitter_php::LANGUAGE_PHP.into())?;
     let tree = parser.parse(source, None).ok_or(ParseError::Parse)?;
+    let root = tree.root_node();
+    let file_has_parse_error = root.has_error();
     let mut directives = Vec::new();
-    walk(tree.root_node(), source.as_bytes(), &mut directives);
+    walk(
+        root,
+        source.as_bytes(),
+        file_has_parse_error,
+        &mut directives,
+    );
     Ok(directives)
 }
 
-fn walk(node: Node<'_>, source: &[u8], out: &mut Vec<RawIncludeDirective>) {
+fn walk(
+    node: Node<'_>,
+    source: &[u8],
+    file_has_parse_error: bool,
+    out: &mut Vec<RawIncludeDirective>,
+) {
     if let Some(kind) = include_kind(node.kind()) {
         if let Some(argument_source) = include_argument(node, source) {
             out.push(RawIncludeDirective {
                 kind,
                 argument_source: argument_source.to_string(),
+                file_has_parse_error,
             });
         }
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk(child, source, out);
+        walk(child, source, file_has_parse_error, out);
     }
 }
 
@@ -118,6 +142,46 @@ require_once 'init.php';
         assert_eq!(directives[0].kind, IncludeKind::Include);
         assert!(directives[0].argument_source.contains("__DIR__"));
         assert!(directives[0].argument_source.contains("'/header.php'"));
+    }
+
+    #[test]
+    fn flags_directive_when_file_has_dangling_concat() {
+        // `__DIR__ . ;` leaves a dangling `.` operator whose right-hand side
+        // is missing. Tree-sitter's recovery closes the `include_expression`
+        // around `__DIR__` and emits the ERROR marker as a sibling, so the
+        // include's own subtree looks clean — only the file-level
+        // `has_error` reflects the failure. This test pins down that the
+        // file-level flag (not the include-local one) is what gets propagated
+        // to each directive.
+        let source = "<?php include __DIR__ . ;";
+        let directives = extract_include_directives(source).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert!(
+            directives[0].file_has_parse_error,
+            "expected file_has_parse_error to be true, got: {:?}",
+            directives[0]
+        );
+    }
+
+    #[test]
+    fn flags_unaffected_directive_when_file_has_unrelated_parse_error() {
+        // The `include` is well-formed, but the trailing `$x =` is not. We
+        // accept that a file-level parse failure marks every directive in
+        // the file as suspect — this is the conservative trade-off for
+        // surfacing broken-PHP cases as unresolved instead of silently
+        // evaluating partial trees.
+        let source = "<?php include 'header.php'; $x =";
+        let directives = extract_include_directives(source).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert!(directives[0].file_has_parse_error);
+    }
+
+    #[test]
+    fn well_formed_file_does_not_flag_parse_error() {
+        let source = r#"<?php include 'header.php';"#;
+        let directives = extract_include_directives(source).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert!(!directives[0].file_has_parse_error);
     }
 
     #[test]

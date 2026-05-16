@@ -50,6 +50,19 @@ pub struct Context<'a> {
 }
 
 pub fn resolve(directive: &RawIncludeDirective, ctx: &Context<'_>) -> Resolved {
+    // If the source file containing this directive failed to parse cleanly,
+    // do not attempt to re-parse and evaluate the argument: any AST we
+    // recover here could silently produce a misleading path even when the
+    // argument's own subtree looks well-formed (tree-sitter's recovery may
+    // close the include_expression early and place the broken construct in
+    // a sibling subtree).
+    if directive.file_has_parse_error {
+        return unresolved(
+            directive,
+            "enclosing PHP source has tree-sitter parse errors",
+        );
+    }
+
     let wrapped = format!("<?php {};", directive.argument_source);
 
     let mut parser = Parser::new();
@@ -287,6 +300,7 @@ mod tests {
         RawIncludeDirective {
             kind: IncludeKind::Include,
             argument_source: arg.to_string(),
+            file_has_parse_error: false,
         }
     }
 
@@ -506,6 +520,33 @@ mod tests {
                 );
             }
             _ => panic!("expected Unresolved for non-variable subscript operand"),
+        }
+    }
+
+    #[test]
+    fn file_has_parse_error_is_short_circuited_to_unresolved() {
+        // The directive carries a syntactically valid argument string in this
+        // unit test, but the `file_has_parse_error` flag tells the resolver
+        // to bail before re-parsing — that's the contract we want enforced
+        // regardless of what `argument_source` happens to contain (the
+        // surrounding file is broken, so any AST we recover for the
+        // argument could be misleading).
+        let file = current_file();
+        let root = document_root();
+        let directive_in_broken_file = RawIncludeDirective {
+            kind: IncludeKind::Include,
+            argument_source: "'header.php'".to_string(),
+            file_has_parse_error: true,
+        };
+        match resolve(&directive_in_broken_file, &ctx_for(&file, &root)) {
+            Resolved::Unresolved {
+                argument_source,
+                reason,
+            } => {
+                assert_eq!(argument_source, "'header.php'");
+                assert!(reason.contains("parse error"));
+            }
+            _ => panic!("expected Unresolved when file_has_parse_error is set"),
         }
     }
 
