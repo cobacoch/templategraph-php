@@ -391,6 +391,36 @@ mod tests {
     }
 
     #[test]
+    fn directive_in_file_with_parse_error_becomes_unresolved() {
+        // The `include` is well-formed in isolation but the trailing `$x =`
+        // leaves the file syntactically broken. Tree-sitter's recovery
+        // still surfaces the include directive, but
+        // `RawIncludeDirective::file_has_parse_error` is set and the
+        // resolver short-circuits the path evaluation to Unresolved rather
+        // than feeding the partially-broken AST to the include-path
+        // evaluator.
+        let mut reader = InMemoryFileReader::new();
+        reader.add("/project/index.php", "<?php include 'header.php'; $x =");
+
+        let graph = build_graph(&[entry("/project/index.php")], &root(), None, &reader).unwrap();
+
+        let unresolved = graph
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Unresolved)
+            .expect("expected an unresolved node for a directive in a broken file");
+        // The argument source is preserved verbatim so the unresolved
+        // dependencies report still surfaces what the user wrote, even
+        // though the surrounding file did not parse.
+        match unresolved.unresolved_reason.as_ref() {
+            Some(UnresolvedReason::DynamicArgument(arg)) => assert_eq!(arg, "'header.php'"),
+            other => panic!("expected DynamicArgument, got: {:?}", other),
+        }
+        assert_eq!(graph.edges.len(), 1);
+        assert_eq!(graph.edges[0].kind, EdgeKind::Unresolved);
+    }
+
+    #[test]
     fn dotdot_in_path_is_normalized() {
         let mut reader = InMemoryFileReader::new();
         reader.add(
